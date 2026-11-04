@@ -84,6 +84,7 @@ const userQ = {
   byEmail: db.prepare('SELECT * FROM users WHERE email=? COLLATE NOCASE'),
   byId: db.prepare('SELECT id,email,role,company_id,active,created_at,last_login_at FROM users WHERE id=?'),
   list: db.prepare('SELECT id,email,role,company_id,active,created_at,last_login_at FROM users ORDER BY created_at DESC'),
+  listCompany: db.prepare('SELECT id,email,role,company_id,active,created_at,last_login_at FROM users WHERE company_id=? ORDER BY created_at DESC'),
   setLogin: db.prepare('UPDATE users SET last_login_at=? WHERE id=?'),
   disable: db.prepare('UPDATE users SET active=0 WHERE id=?'),
   deleteSessionsForUser: db.prepare('DELETE FROM user_sessions WHERE user_id=?'),
@@ -113,3 +114,4 @@ export const getCompanyOverview = (companyId, limit = 50) => ({
 });
 
 export const disableUser = (id) => { const result = userQ.disable.run(id); userQ.deleteSessionsForUser.run(id); return result.changes; };
+export const listCompanyUsers = (companyId) => userQ.listCompany.all(companyId);
