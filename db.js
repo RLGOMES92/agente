@@ -45,6 +45,11 @@ const q = {
   clear: db.prepare('DELETE FROM messages WHERE company=? AND phone=?'),
   seen: db.prepare('INSERT OR IGNORE INTO seen (id, ts) VALUES (?, ?)'),
   purge: db.prepare('DELETE FROM seen WHERE ts < ?'),
+  statsByCompany: db.prepare(`SELECT company, COUNT(*) AS conversations FROM conversations WHERE company=? GROUP BY company`),
+  recentByCompany: db.prepare(`SELECT c.company, c.phone, c.paused, c.updated,
+    (SELECT m.content FROM messages m WHERE m.company=c.company AND m.phone=c.phone ORDER BY m.id DESC LIMIT 1) AS last_message,
+    (SELECT m.ts FROM messages m WHERE m.company=c.company AND m.phone=c.phone ORDER BY m.id DESC LIMIT 1) AS last_message_at
+    FROM conversations c WHERE c.company=? ORDER BY COALESCE(c.updated,0) DESC LIMIT ?`),
   stats: db.prepare(`SELECT company, COUNT(*) AS conversations,
     SUM(CASE WHEN paused=1 THEN 1 ELSE 0 END) AS paused
     FROM conversations GROUP BY company`),
@@ -95,3 +100,11 @@ export const createUserSession = (hash,userId,expiresAt) => userQ.saveSession.ru
 export const getSessionUser = (hash) => userQ.session.get(hash,Date.now());
 export const deleteUserSession = (hash) => userQ.deleteSession.run(hash);
 export const purgeUserSessions = () => userQ.purgeSessions.run(Date.now());
+
+export const getCompanyOverview = (companyId, limit = 50) => ({
+  companies: q.statsByCompany.all(companyId),
+  recent: q.recentByCompany.all(companyId, Math.min(100, Math.max(1, Number(limit) || 50))).map((row) => ({
+    ...row,
+    last_message: row.last_message ? String(row.last_message).slice(0, 160) : null,
+  })),
+});
