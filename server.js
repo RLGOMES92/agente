@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import crypto from 'node:crypto';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { loadCompanies, askClaude, parseReply, FALLBACK_HANDOFF } from './agent.js';
 import { sendText } from './whatsapp.js';
@@ -15,6 +17,8 @@ for (const company of Object.values(companies)) {
 if (!process.env.APP_SECRET) console.warn('[SEGURANÇA] APP_SECRET ausente: validação da assinatura dos webhooks está desativada.');
 
 const app = express();
+const root = path.dirname(fileURLToPath(import.meta.url));
+app.use('/painel', express.static(path.join(root, 'public'), { index: 'index.html', maxAge: '1h' }));
 app.use(express.json({ limit: '1mb', verify: (req, _res, buf) => { req.raw = buf; } }));
 
 app.get('/webhook', (req, res) => {
@@ -139,6 +143,7 @@ function isAdmin(req) {
 
 app.get('/admin/overview', (req, res) => {
   if (!isAdmin(req)) return res.sendStatus(401);
+  res.set('Cache-Control', 'no-store');
   const limit = Number.parseInt(req.query.limit, 10) || 50;
   return res.json({ ok: true, ...db.getOverview(limit) });
 });
