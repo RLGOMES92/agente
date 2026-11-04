@@ -8,6 +8,7 @@ import express from 'express';
 import { loadCompanies, askClaude, parseReply, FALLBACK_HANDOFF } from './agent.js';
 import { sendText } from './whatsapp.js';
 import * as db from './db.js';
+import { verifyMetaSignature } from './security.js';
 
 let companies = loadCompanies();
 let byPhoneId = {};
@@ -22,7 +23,7 @@ for (const company of Object.values(companies)) {
   if (!company.phone_number_id) console.warn(`[CONFIG] ${company.id}: phone_number_id ainda não configurado; WhatsApp não receberá mensagens.`);
   if (!company.team_number) console.warn(`[CONFIG] ${company.id}: team_number ainda não configurado; avisos de transbordo não serão enviados.`);
 }
-if (!process.env.APP_SECRET) console.warn('[SEGURANÇA] APP_SECRET ausente: validação da assinatura dos webhooks está desativada.');
+if (!process.env.APP_SECRET) console.warn('[SEGURANÇA] APP_SECRET ausente: webhooks serão rejeitados em produção.');
 
 const app = express();
 const scrypt = promisify(crypto.scrypt);
@@ -89,12 +90,15 @@ app.get('/webhook', (req, res) => {
 });
 
 app.post('/webhook', (req, res) => {
-  if (process.env.APP_SECRET) {
-    const signature = req.get('x-hub-signature-256') || '';
-    const expected = 'sha256=' + crypto.createHmac('sha256', process.env.APP_SECRET).update(req.raw || Buffer.alloc(0)).digest('hex');
-    const valid = signature.length === expected.length
-      && crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
-    if (!valid) return res.sendStatus(401);
+  const appSecret = process.env.APP_SECRET || '';
+  const signature = req.get('x-hub-signature-256') || '';
+  if (!appSecret && process.env.NODE_ENV === 'production') {
+    console.error('[SEGURANÇA] Webhook recusado: APP_SECRET não configurado em produção.');
+    return res.sendStatus(503);
+  }
+  if (appSecret && !verifyMetaSignature(req.raw, signature, appSecret)) return res.sendStatus(401);
+  if (!appSecret && process.env.NODE_ENV !== 'production') {
+    console.warn('[SEGURANÇA] Webhook sem assinatura aceito somente fora de produção.');
   }
 
   // Confirma o recebimento rapidamente; o processamento acontece na fila.
