@@ -283,6 +283,7 @@ app.post('/auth/change-password', async (req, res) => {
   const user = sessionUser(req);
   if (!user) return res.sendStatus(401);
   const currentPassword = typeof req.body?.current_password === 'string' ? req.body.current_password : '';
+  if (!currentPassword || currentPassword.length > 1024) return res.status(400).json({ ok: false, error: 'Senha atual inválida.' });
   const newPassword = typeof req.body?.new_password === 'string' ? req.body.new_password : '';
   if (newPassword.length < 12 || newPassword.length > 1024) {
     return res.status(400).json({ ok: false, error: 'A nova senha deve ter entre 12 e 1024 caracteres.' });
@@ -346,6 +347,7 @@ app.post('/admin/users', async (req, res) => {
     audit('admin.user_created', null, 'user', String(id), { role, company_id: companyId });
     return res.status(201).json({ ok: true, user: db.getUserById(id) });
   } catch (error) {
+    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ ok: false, error: 'Este e-mail já está cadastrado.' });
     console.error('[ADMIN] Falha ao criar usuário:', error);
     return res.status(500).json({ ok: false, error: 'Não foi possível criar o usuário.' });
   }
@@ -379,6 +381,7 @@ app.post('/tenant/users', async (req, res) => {
     audit('tenant.user_created', user, 'user', String(id), { role });
     return res.status(201).json({ ok: true, user: db.getUserById(id) });
   } catch (error) {
+    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ ok: false, error: 'Este e-mail já está cadastrado.' });
     console.error('[TENANT] Falha ao criar usuário da empresa:', error);
     return res.status(500).json({ ok: false, error: 'Não foi possível criar o usuário.' });
   }
