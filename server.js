@@ -6,20 +6,23 @@ import { sendText } from './whatsapp.js';
 import * as db from './db.js';
 
 const companies = loadCompanies();
-const byPhoneId = Object.fromEntries(Object.values(companies).map((c) => [c.phone_number_id, c]));
+const byPhoneId = Object.fromEntries(Object.values(companies).filter((c) => c.phone_number_id).map((c) => [c.phone_number_id, c]));
 console.log('Empresas carregadas:', Object.keys(companies).join(', '));
+for (const company of Object.values(companies)) {
+  if (!company.phone_number_id) console.warn(`[CONFIG] ${company.id}: phone_number_id ainda não configurado; WhatsApp não receberá mensagens.`);
+  if (!company.team_number) console.warn(`[CONFIG] ${company.id}: team_number ainda não configurado; avisos de transbordo não serão enviados.`);
+}
+if (!process.env.APP_SECRET) console.warn('[SEGURANÇA] APP_SECRET ausente: validação da assinatura dos webhooks está desativada.');
 
 const app = express();
 app.use(express.json({ verify: (req, _res, buf) => { req.raw = buf; } }));
 
-// 1) Verificação do webhook (Meta)
 app.get('/webhook', (req, res) => {
   const { 'hub.mode': mode, 'hub.verify_token': t, 'hub.challenge': ch } = req.query;
   if (mode === 'subscribe' && t === process.env.VERIFY_TOKEN) return res.status(200).send(ch);
   res.sendStatus(403);
 });
 
-// 2) Recebimento de mensagens
 app.post('/webhook', (req, res) => {
   if (process.env.APP_SECRET) {
     const sig = req.get('x-hub-signature-256') || '';
@@ -27,7 +30,7 @@ app.post('/webhook', (req, res) => {
     const ok = sig.length === exp.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(exp));
     if (!ok) return res.sendStatus(401);
   }
-  res.sendStatus(200); // responde rápido; processa depois
+  res.sendStatus(200);
 
   for (const entry of req.body.entry || [])
     for (const change of entry.changes || []) {
@@ -39,7 +42,6 @@ app.post('/webhook', (req, res) => {
     }
 });
 
-// Fila por conversa: evita respostas fora de ordem se o cliente mandar várias mensagens seguidas
 const queues = new Map();
 function enqueue(key, job) {
   const next = (queues.get(key) || Promise.resolve()).then(job);
@@ -58,10 +60,9 @@ async function handoff(company, phone, summary) {
 }
 
 async function handle(company, msg) {
-  if (!db.markSeen(msg.id)) return; // duplicada
+  if (!db.markSeen(msg.id)) return;
   const phone = msg.from;
 
-  // Comando da equipe: "#reativar 5511999999999"
   if (phone === company.team_number) {
     const m = msg.text?.body?.match(/^#reativar\s+(\d+)/i);
     if (m) {
@@ -72,9 +73,8 @@ async function handle(company, msg) {
     return;
   }
 
-  if (db.isPaused(company.id, phone)) return; // humano atendendo
+  if (db.isPaused(company.id, phone)) return;
 
-  // Áudio, imagem etc.: vai direto para humano
   if (msg.type !== 'text') {
     await sendText(company, phone, 'Recebi seu arquivo! 😊 Um atendente da equipe vai analisar em instantes.');
     return handoff(company, phone, `Cliente enviou ${msg.type}`);
@@ -96,7 +96,6 @@ async function handle(company, msg) {
   if (h) await handoff(company, phone, summary);
 }
 
-// Reativar via API: POST /admin/resume  { company, phone }  Header: x-admin-token
 app.post('/admin/resume', (req, res) => {
   if (!process.env.ADMIN_TOKEN || req.get('x-admin-token') !== process.env.ADMIN_TOKEN) return res.sendStatus(401);
   const { company, phone } = req.body || {};
@@ -106,6 +105,6 @@ app.post('/admin/resume', (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/health', (_req, res) => res.send('ok'));
+app.get('/health', (_req, res) => res.json({ ok: true, service: 'agente-whatsapp' }));
 setInterval(db.purgeSeen, 3600 * 1000);
 app.listen(process.env.PORT || 3000, () => console.log('Agente no ar'));
