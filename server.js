@@ -344,7 +344,6 @@ app.post('/admin/users', async (req, res) => {
     const hash = await scrypt(password, salt, 64);
     const id = db.createUser({ email: email.trim().toLowerCase(), password_hash: hash.toString('hex'), password_salt: salt, role, company_id: companyId });
     audit('admin.user_created', null, 'user', String(id), { role, company_id: companyId });
-    audit('tenant.user_created', user, 'user', String(id), { role });
     return res.status(201).json({ ok: true, user: db.getUserById(id) });
   } catch (error) {
     console.error('[ADMIN] Falha ao criar usuário:', error);
@@ -377,6 +376,7 @@ app.post('/tenant/users', async (req, res) => {
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = await scrypt(password, salt, 64);
     const id = db.createUser({ email: email.trim().toLowerCase(), password_hash: hash.toString('hex'), password_salt: salt, role, company_id: user.company_id });
+    audit('tenant.user_created', user, 'user', String(id), { role });
     return res.status(201).json({ ok: true, user: db.getUserById(id) });
   } catch (error) {
     console.error('[TENANT] Falha ao criar usuário da empresa:', error);
