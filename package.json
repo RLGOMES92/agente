@@ -6,7 +6,7 @@
     "start": "node server.js",
     "chat": "node chat.js",
     "test": "node --test",
-    "check": "node --check server.js && node --check agent.js && node --check chat.js && node --check whatsapp.js && node --check db.js"
+    "check": "node --check server.js && node --check agent.js && node --check chat.js && node --check whatsapp.js && node --check db.js && node --check agent.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.40.0",
