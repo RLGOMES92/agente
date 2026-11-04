@@ -276,7 +276,7 @@ app.get('/admin/users', (req, res) => {
 app.post('/admin/users', async (req, res) => {
   if (!isAdmin(req)) return res.sendStatus(401);
   const { email, password, role, company_id: companyId = null } = req.body || {};
-  if (typeof email !== 'string' || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || email.length > 254) {
+  if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
     return res.status(400).json({ ok: false, error: 'E-mail inválido.' });
   }
   if (typeof password !== 'string' || password.length < 12 || password.length > 1024) {
@@ -297,6 +297,26 @@ app.post('/admin/users', async (req, res) => {
     console.error('[ADMIN] Falha ao criar usuário:', error);
     return res.status(500).json({ ok: false, error: 'Não foi possível criar o usuário.' });
   }
+});
+
+app.get('/tenant/overview', (req, res) => {
+  const user = sessionUser(req);
+  if (!user) return res.sendStatus(401);
+  if (!user.company_id || !['company_admin', 'operator', 'viewer'].includes(user.role)) return res.sendStatus(403);
+  res.set('Cache-Control', 'no-store');
+  const limit = Number.parseInt(req.query.limit, 10) || 50;
+  return res.json({ ok: true, company_id: user.company_id, ...db.getCompanyOverview(user.company_id, limit) });
+});
+
+app.post('/admin/users/:id/disable', (req, res) => {
+  if (!isAdmin(req)) return res.sendStatus(401);
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isSafeInteger(id) || id < 1) return res.sendStatus(400);
+  const user = db.getUserById(id);
+  if (!user) return res.sendStatus(404);
+  if (!user.active) return res.json({ ok: true, already_disabled: true });
+  const disabled = db.disableUser(id);
+  return res.json({ ok: true, disabled: disabled === 1 });
 });
 
 app.get('/admin/companies', (req, res) => {
