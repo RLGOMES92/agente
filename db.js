@@ -84,6 +84,8 @@ const userQ = {
   byId: db.prepare('SELECT id,email,role,company_id,active,created_at,last_login_at FROM users WHERE id=?'),
   list: db.prepare('SELECT id,email,role,company_id,active,created_at,last_login_at FROM users ORDER BY created_at DESC'),
   setLogin: db.prepare('UPDATE users SET last_login_at=? WHERE id=?'),
+  disable: db.prepare('UPDATE users SET active=0 WHERE id=?'),
+  deleteSessionsForUser: db.prepare('DELETE FROM user_sessions WHERE user_id=?'),
   saveSession: db.prepare('INSERT INTO user_sessions (token_hash,user_id,expires_at,created_at) VALUES (?,?,?,?)'),
   session: db.prepare(`SELECT u.id,u.email,u.role,u.company_id,u.active,s.expires_at
     FROM user_sessions s JOIN users u ON u.id=s.user_id
@@ -108,3 +110,5 @@ export const getCompanyOverview = (companyId, limit = 50) => ({
     last_message: row.last_message ? String(row.last_message).slice(0, 160) : null,
   })),
 });
+
+export const disableUser = (id) => { const result = userQ.disable.run(id); userQ.deleteSessionsForUser.run(id); return result.changes; };
