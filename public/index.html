@@ -64,6 +64,19 @@
   <div id="tenantTeamStatus" class="status" role="status"></div>
   <div id="tenantUsers" class="company-grid"></div>
  </section>
+ <section class="panel editor">
+  <div class="section-head"><div><h2>Segurança da conta</h2><p class="muted small">Atualize sua senha de acesso.</p></div></div>
+  <form id="tenantPasswordForm">
+   <div class="editor-grid"><div><label class="small" for="currentPassword">Senha atual</label><input id="currentPassword" class="input" type="password" autocomplete="current-password" required></div><div><label class="small" for="newPassword">Nova senha (mínimo 12 caracteres)</label><input id="newPassword" class="input" type="password" minlength="12" maxlength="1024" autocomplete="new-password" required></div></div>
+   <div class="actions" style="margin-top:12px"><button class="btn" type="submit">Alterar senha</button></div>
+  </form>
+  <div id="tenantPasswordStatus" class="status" role="status"></div>
+ </section>
+ <section id="tenantAuditPanel" class="panel editor hidden">
+  <div class="section-head"><div><h2>Atividades da equipe</h2><p class="muted small">Eventos administrativos recentes desta empresa.</p></div></div>
+  <div id="tenantAuditList" class="company-grid"></div>
+  <div id="tenantAuditEmpty" class="empty hidden">Nenhuma atividade registrada.</div>
+ </section>
  <div id="tenantStatus" class="status" role="status"></div>
 </section>
 </main>
@@ -149,6 +162,15 @@ async function loadTenant(){
    const users=(await usersRes.json()).users||[];const box=$('tenantUsers');box.replaceChildren();
    for(const u of users){const card=el('article','company');card.append(el('strong','',u.email));card.append(el('div','small muted',u.role+' · '+(u.active?'Ativo':'Desativado')));if(u.active&&u.id!==tenantUser.id&&['operator','viewer'].includes(u.role)){const btn=el('button','btn secondary','Desativar');btn.type='button';btn.addEventListener('click',()=>disableTenantUser(u.id,btn));card.append(btn)}box.append(card)}
   }else team.classList.add('hidden');
+  const auditPanel=$('tenantAuditPanel');
+  if(tenantUser?.role==='company_admin'){
+   auditPanel.classList.remove('hidden');
+   const auditRes=await tenantRequest('/tenant/audit?limit=50');
+   if(!auditRes.ok)throw new Error('Não foi possível carregar a auditoria.');
+   const logs=(await auditRes.json()).logs||[];const auditBox=$('tenantAuditList');auditBox.replaceChildren();
+   for(const log of logs){const item=el('article','company');item.append(el('strong','',log.action));item.append(el('div','small muted',dateLabel(log.created_at)));if(log.target_type)item.append(el('div','small muted',log.target_type+(log.target_id?' · '+log.target_id:'')));auditBox.append(item)}
+   $('tenantAuditEmpty').classList.toggle('hidden',logs.length>0);
+  }else auditPanel.classList.add('hidden');
  }catch(error){$('tenantStatus').textContent=error.message}
 }
 async function disableTenantUser(id,button){
@@ -167,6 +189,16 @@ $('tenantUserForm').addEventListener('submit',async event=>{
  event.preventDefault();$('tenantTeamStatus').textContent='Criando usuário…';
  try{const res=await tenantRequest('/tenant/users',{method:'POST',body:JSON.stringify({email:$('newUserEmail').value.trim(),password:$('newUserPassword').value,role:$('newUserRole').value})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Não foi possível criar usuário.');$('newUserEmail').value='';$('newUserPassword').value='';$('tenantTeamStatus').textContent='Usuário criado.';await loadTenant()}
  catch(error){$('tenantTeamStatus').textContent=error.message}
+});
+$('tenantPasswordForm').addEventListener('submit',async event=>{
+ event.preventDefault();$('tenantPasswordStatus').textContent='Atualizando senha…';
+ const button=$('tenantPasswordForm').querySelector('button[type="submit"]');button.disabled=true;
+ try{
+  const res=await tenantRequest('/auth/change-password',{method:'POST',body:JSON.stringify({current_password:$('currentPassword').value,new_password:$('newPassword').value})});
+  const data=await res.json();if(!res.ok)throw new Error(data.error||'Não foi possível alterar a senha.');
+  $('currentPassword').value='';$('newPassword').value='';$('tenantPasswordStatus').textContent='Senha alterada. As outras sessões foram encerradas.';
+ }catch(error){$('tenantPasswordStatus').textContent=error.message}
+ finally{button.disabled=false}
 });
 $('tenantRefresh').addEventListener('click',loadTenant);
 
