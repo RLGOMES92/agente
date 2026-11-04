@@ -93,7 +93,9 @@ Endpoints:
 - Nunca envie `.env`, tokens, chaves ou segredos para o GitHub.
 - O `.gitignore` protege o arquivo `.env` e o banco local.
 - Use tokens fortes e exclusivos para `VERIFY_TOKEN` e `ADMIN_TOKEN`.
-- Configure `APP_SECRET` para validar a assinatura dos webhooks.
+- Em produção, `APP_SECRET` é obrigatório: sem ele, `POST /webhook` responde `503`; com ele, toda requisição precisa apresentar `X-Hub-Signature-256` válida. Fora de produção, a assinatura pode ficar sem configuração apenas para desenvolvimento local.
+- `VERIFY_TOKEN` é obrigatório para a verificação inicial do webhook da Meta; `ADMIN_TOKEN` deve ser forte e exclusivo para proteger as rotas administrativas.
+- O login limita tentativas por IP e por conta (8 falhas em 15 minutos). O contador é mantido em memória; em múltiplas instâncias, configure também um limitador compartilhado no proxy/Redis.
 - A configuração da DaPaz é inicial e não contém preços nem dados de agenda; revise e complete a base antes de atendimento real.
 
 
@@ -117,7 +119,7 @@ A autenticação de usuários é separada do acesso administrativo por `ADMIN_TO
 - `POST /tenant/users`: cria usuários `operator` ou `viewer` na própria empresa (somente `company_admin`).
 - `POST /tenant/users/:id/disable`: desativa operador/visualizador da própria empresa e revoga suas sessões; não permite desativar a própria conta nem administradores.
 
-As senhas são derivadas com scrypt e salt aleatório; o banco armazena apenas o hash. O token de sessão é armazenado como hash SHA-256. Tentativas de login por IP são limitadas temporariamente, com limpeza periódica do controle em memória. A auditoria registra ações administrativas e de autenticação sem armazenar senhas, tokens ou conteúdo de mensagens. Não compartilhe tokens de sessão e use HTTPS em produção.
+As senhas são derivadas com scrypt e salt aleatório; o banco armazena apenas o hash. O token de sessão é armazenado como hash SHA-256. Tentativas de login por IP e por conta são limitadas temporariamente (8 falhas em 15 minutos), com limpeza periódica do controle em memória. Em múltiplas instâncias, use também um limitador compartilhado no proxy/Redis. A auditoria registra ações administrativas e de autenticação sem armazenar senhas, tokens ou conteúdo de mensagens. Não compartilhe tokens de sessão e use HTTPS em produção.
 
 **Painel:** a tela `/painel/` oferece duas entradas: console administrativo via `ADMIN_TOKEN` e acesso da equipe via e-mail/senha. O acesso da equipe mostra somente os indicadores e conversas da empresa vinculada; o papel `company_admin` também pode cadastrar e desativar operadores/visualizadores da própria empresa.
 
