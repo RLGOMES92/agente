@@ -45,7 +45,9 @@
 <script>
 const $=id=>document.getElementById(id);
 let token=sessionStorage.getItem('veyrion_admin_token')||'';
-let rows=[];\nlet companyConfigs=[];\nlet editingCompany=null;
+let rows=[];
+let companyConfigs=[];
+let editingCompany=null;
 function showDashboard(on){$('login').classList.toggle('hidden',on);$('dashboard').classList.toggle('hidden',!on);$('logout').classList.toggle('hidden',!on)}
 function dateLabel(value){if(!value)return '—';const d=new Date(Number(value));return Number.isNaN(d.getTime())?'—':d.toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'})}
 function el(tag,cls,txt){const n=document.createElement(tag);if(cls)n.className=cls;if(txt!==undefined)n.textContent=txt;return n}
@@ -98,7 +100,8 @@ $('saveCompany').addEventListener('click',async()=>{
  }catch(error){$('companyEditorStatus').textContent=error.message}
  finally{button.disabled=false}
 });
-\nfunction renderRows(){
+
+function renderRows(){
  const body=$('conversations');body.replaceChildren();const q=$('filter').value.trim().toLowerCase();
  const filtered=rows.filter(r=>(r.company+' '+r.phone).toLowerCase().includes(q));
  $('empty').classList.toggle('hidden',filtered.length>0);
