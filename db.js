@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 
 const db = new Database(process.env.DB_PATH || 'agente.db');
 db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
 db.exec(`
 CREATE TABLE IF NOT EXISTS conversations (
   company TEXT, phone TEXT, paused INTEGER DEFAULT 0, updated INTEGER,
