@@ -111,6 +111,9 @@ A autenticação de usuários é separada do acesso administrativo por `ADMIN_TO
 - `GET /auth/me`: valida a sessão pelo header `Authorization: Bearer <token>`.
 - `POST /auth/logout`: encerra a sessão apresentada.
 - `GET /tenant/overview`: retorna indicadores e conversas somente da empresa vinculada ao usuário autenticado.
+- `GET /tenant/users`: lista os usuários vinculados à empresa (somente `company_admin`).
+- `POST /tenant/users`: cria usuários `operator` ou `viewer` na própria empresa (somente `company_admin`).
+- `POST /tenant/users/:id/disable`: desativa operador/visualizador da própria empresa e revoga suas sessões; não permite desativar a própria conta nem administradores.
 
 As senhas são derivadas com scrypt e salt aleatório; o banco armazena apenas o hash. O token de sessão é armazenado como hash SHA-256. Tentativas de login por IP são limitadas temporariamente. Não compartilhe tokens de sessão e use HTTPS em produção.
 
