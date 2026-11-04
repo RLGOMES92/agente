@@ -110,12 +110,15 @@ A autenticação de usuários é separada do acesso administrativo por `ADMIN_TO
 - `POST /auth/login`: recebe e-mail e senha e retorna token de sessão com validade de 12 horas.
 - `GET /auth/me`: valida a sessão pelo header `Authorization: Bearer <token>`.
 - `POST /auth/logout`: encerra a sessão apresentada.
+- `POST /auth/change-password`: altera a senha com validação da senha atual e encerra as demais sessões do usuário.
+- `GET /admin/audit`: consulta o registro global de eventos, protegido por `ADMIN_TOKEN`.
+- `GET /tenant/audit`: consulta eventos da própria empresa (somente `company_admin`).
 - `GET /tenant/overview`: retorna indicadores e conversas somente da empresa vinculada ao usuário autenticado.
 - `GET /tenant/users`: lista os usuários vinculados à empresa (somente `company_admin`).
 - `POST /tenant/users`: cria usuários `operator` ou `viewer` na própria empresa (somente `company_admin`).
 - `POST /tenant/users/:id/disable`: desativa operador/visualizador da própria empresa e revoga suas sessões; não permite desativar a própria conta nem administradores.
 
-As senhas são derivadas com scrypt e salt aleatório; o banco armazena apenas o hash. O token de sessão é armazenado como hash SHA-256. Tentativas de login por IP são limitadas temporariamente. Não compartilhe tokens de sessão e use HTTPS em produção.
+As senhas são derivadas com scrypt e salt aleatório; o banco armazena apenas o hash. O token de sessão é armazenado como hash SHA-256. Tentativas de login por IP são limitadas temporariamente, com limpeza periódica do controle em memória. A auditoria registra ações administrativas e de autenticação sem armazenar senhas, tokens ou conteúdo de mensagens. Não compartilhe tokens de sessão e use HTTPS em produção.
 
 **Painel:** a tela `/painel/` oferece duas entradas: console administrativo via `ADMIN_TOKEN` e acesso da equipe via e-mail/senha. O acesso da equipe mostra somente os indicadores e conversas da empresa vinculada; o papel `company_admin` também pode cadastrar e desativar operadores/visualizadores da própria empresa.
 
