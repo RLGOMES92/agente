@@ -76,10 +76,15 @@ Painel administrativo:
 - Abra `https://SEU-DOMINIO/painel/` no navegador.
 - Informe o `ADMIN_TOKEN`; o token fica somente na sessão atual do navegador.
 - O painel consulta `/admin/overview`, atualiza os indicadores automaticamente e permite reativar conversas pausadas. A reativação limpa o histórico da conversa.
+- Administradores também podem cadastrar e editar empresas pela seção **Empresas**. O cadastro valida o identificador, os campos obrigatórios e a unicidade do Phone Number ID. As configurações são salvas em `companies/<id>.json` e recarregadas pelo servidor sem reinício.
+- O painel não armazena tokens da Meta: `token_env` guarda apenas o nome da variável de ambiente. Cadastre o valor secreto no ambiente de hospedagem antes de conectar a empresa.
 
 Endpoints:
 - `GET /health`: verificação simples de disponibilidade.
 - `GET /admin/overview`: resumo de operação protegido por `ADMIN_TOKEN` no header `x-admin-token`.
+- `GET /admin/companies`: lista configurações administrativas sem retornar segredos.
+- `POST /admin/companies`: cadastra empresa; recebe `id`, `phone_number_id`, `token_env`, `team_number` e `variables`.
+- `PUT /admin/companies/:id`: atualiza os mesmos campos de uma empresa existente.
 - `GET /webhook` e `POST /webhook`: verificação e recebimento de eventos da Meta.
 - `GET /admin/overview`: visão administrativa autenticada por `x-admin-token`, com totais por empresa e até 100 conversas recentes (sem expor credenciais ou histórico completo).
 - `POST /admin/resume`: reativação autenticada de conversa.
