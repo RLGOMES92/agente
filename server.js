@@ -2,6 +2,7 @@ import 'dotenv/config';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { loadCompanies, askClaude, parseReply, FALLBACK_HANDOFF } from './agent.js';
@@ -24,6 +25,10 @@ for (const company of Object.values(companies)) {
 if (!process.env.APP_SECRET) console.warn('[SEGURANÇA] APP_SECRET ausente: validação da assinatura dos webhooks está desativada.');
 
 const app = express();
+const scrypt = promisify(crypto.scrypt);
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const USER_ROLES = new Set(['platform_admin', 'company_admin', 'operator', 'viewer']);
+const loginAttempts = new Map();
 const root = path.dirname(fileURLToPath(import.meta.url));
 const companiesDir = path.join(root, 'companies');
 const companyIdPattern = /^[a-z0-9][a-z0-9_-]{0,39}$/;
@@ -199,6 +204,100 @@ function isAdmin(req) {
   const b = Buffer.from(expected);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
+
+function bearerToken(req) {
+  const header = req.get('authorization') || '';
+  return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+}
+function sessionUser(req) {
+  const token = bearerToken(req);
+  if (!token || token.length > 200) return null;
+  return db.getSessionUser(crypto.createHash('sha256').update(token).digest('hex')) || null;
+}
+function loginBlocked(ip) {
+  const entry = loginAttempts.get(ip);
+  if (!entry) return false;
+  if (Date.now() - entry.startedAt > 15 * 60 * 1000) {
+    loginAttempts.delete(ip);
+    return false;
+  }
+  return entry.count >= 8;
+}
+function recordLoginFailure(ip) {
+  const now = Date.now();
+  const entry = loginAttempts.get(ip);
+  if (!entry || now - entry.startedAt > 15 * 60 * 1000) loginAttempts.set(ip, { count: 1, startedAt: now });
+  else entry.count += 1;
+}
+
+app.post('/auth/login', async (req, res) => {
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  if (loginBlocked(ip)) return res.status(429).json({ ok: false, error: 'Muitas tentativas. Aguarde 15 minutos.' });
+  const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const password = typeof req.body?.password === 'string' ? req.body.password : '';
+  if (!email || email.length > 254 || password.length > 1024) return res.status(400).json({ ok: false, error: 'Credenciais inválidas.' });
+  const user = db.getUserByEmail(email);
+  if (!user || !user.active) {
+    recordLoginFailure(ip);
+    return res.status(401).json({ ok: false, error: 'E-mail ou senha inválidos.' });
+  }
+  const candidate = await scrypt(password, user.password_salt, 64);
+  const expected = Buffer.from(user.password_hash, 'hex');
+  if (expected.length !== candidate.length || !crypto.timingSafeEqual(expected, candidate)) {
+    recordLoginFailure(ip);
+    return res.status(401).json({ ok: false, error: 'E-mail ou senha inválidos.' });
+  }
+  loginAttempts.delete(ip);
+  const token = crypto.randomBytes(32).toString('base64url');
+  const expiresAt = Date.now() + SESSION_TTL_MS;
+  db.createUserSession(crypto.createHash('sha256').update(token).digest('hex'), user.id, expiresAt);
+  db.updateUserLogin(user.id);
+  return res.json({ ok: true, token, expires_at: expiresAt, user: { id: user.id, email: user.email, role: user.role, company_id: user.company_id } });
+});
+
+app.get('/auth/me', (req, res) => {
+  const user = sessionUser(req);
+  if (!user) return res.sendStatus(401);
+  return res.json({ ok: true, user: { id: user.id, email: user.email, role: user.role, company_id: user.company_id } });
+});
+
+app.post('/auth/logout', (req, res) => {
+  const token = bearerToken(req);
+  if (token) db.deleteUserSession(crypto.createHash('sha256').update(token).digest('hex'));
+  return res.json({ ok: true });
+});
+
+app.get('/admin/users', (req, res) => {
+  if (!isAdmin(req)) return res.sendStatus(401);
+  res.set('Cache-Control', 'no-store');
+  return res.json({ ok: true, users: db.listUsers() });
+});
+
+app.post('/admin/users', async (req, res) => {
+  if (!isAdmin(req)) return res.sendStatus(401);
+  const { email, password, role, company_id: companyId = null } = req.body || {};
+  if (typeof email !== 'string' || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) || email.length > 254) {
+    return res.status(400).json({ ok: false, error: 'E-mail inválido.' });
+  }
+  if (typeof password !== 'string' || password.length < 12 || password.length > 1024) {
+    return res.status(400).json({ ok: false, error: 'A senha deve ter entre 12 e 1024 caracteres.' });
+  }
+  if (!USER_ROLES.has(role)) return res.status(400).json({ ok: false, error: 'Papel de usuário inválido.' });
+  refreshCompanies();
+  if (role === 'platform_admin' ? companyId !== null : (typeof companyId !== 'string' || !companies[companyId])) {
+    return res.status(400).json({ ok: false, error: 'Vínculo de empresa inválido para este papel.' });
+  }
+  if (db.getUserByEmail(email.trim().toLowerCase())) return res.status(409).json({ ok: false, error: 'Este e-mail já está cadastrado.' });
+  try {
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = await scrypt(password, salt, 64);
+    const id = db.createUser({ email: email.trim().toLowerCase(), password_hash: hash.toString('hex'), password_salt: salt, role, company_id: companyId });
+    return res.status(201).json({ ok: true, user: db.getUserById(id) });
+  } catch (error) {
+    console.error('[ADMIN] Falha ao criar usuário:', error);
+    return res.status(500).json({ ok: false, error: 'Não foi possível criar o usuário.' });
+  }
+});
 
 app.get('/admin/companies', (req, res) => {
   if (!isAdmin(req)) return res.sendStatus(401);
