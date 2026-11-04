@@ -117,4 +117,15 @@ A autenticação de usuários é separada do acesso administrativo por `ADMIN_TO
 
 As senhas são derivadas com scrypt e salt aleatório; o banco armazena apenas o hash. O token de sessão é armazenado como hash SHA-256. Tentativas de login por IP são limitadas temporariamente. Não compartilhe tokens de sessão e use HTTPS em produção.
 
-**Importante:** o painel web atual continua sendo o console administrativo baseado em `ADMIN_TOKEN`. As rotas de autenticação e visão de empresa estão disponíveis no backend, mas a tela de login individual por empresa ainda será integrada numa próxima etapa.
+**Painel:** a tela `/painel/` oferece duas entradas: console administrativo via `ADMIN_TOKEN` e acesso da equipe via e-mail/senha. O acesso da equipe mostra somente os indicadores e conversas da empresa vinculada; o papel `company_admin` também pode cadastrar e desativar operadores/visualizadores da própria empresa.
+
+Para criar o primeiro usuário de plataforma, use o console administrativo autenticado por `ADMIN_TOKEN`:
+
+```bash
+curl -X POST "$BASE_URL/admin/users" \
+  -H "x-admin-token: $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@seudominio.com","password":"TROQUE-POR-UMA-SENHA-FORTE","role":"platform_admin","company_id":null}'
+```
+
+Depois, entre em `/painel/` pela opção **Acesso da equipe** usando o e-mail e a senha criados. Para vincular administradores e equipes a uma empresa, informe o `company_id` correspondente ao criar o usuário.
