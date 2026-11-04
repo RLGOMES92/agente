@@ -44,6 +44,12 @@
  <div id="companies" class="company-grid"></div>
  <div class="section-head"><h2>Conversas recentes</h2><span class="muted small">Até 100 registros</span></div>
  <div class="panel table-wrap"><table class="table"><thead><tr><th>Empresa</th><th>Cliente</th><th>Status</th><th>Última atividade</th><th>Última mensagem</th><th>Ação</th></tr></thead><tbody id="conversations"></tbody></table><div id="empty" class="empty hidden">Nenhuma conversa encontrada.</div></div>
+ <section id="adminAuditPanel" class="panel editor">
+  <div class="section-head"><div><h2>Auditoria global</h2><p class="muted small">Atividades administrativas e de autenticação de todas as empresas.</p></div><button id="adminAuditRefresh" class="btn secondary" type="button">Atualizar auditoria</button></div>
+  <div id="adminAuditList" class="company-grid"></div>
+  <div id="adminAuditEmpty" class="empty hidden">Nenhuma atividade registrada.</div>
+  <div id="adminAuditStatus" class="status" role="status"></div>
+ </section>
  <div id="dashboardStatus" class="status" role="status"></div>
  <div class="foot">Atualização automática a cada 30 segundos. Os dados exibidos dependem das mensagens processadas e armazenadas no servidor.</div>
 </section>
@@ -109,9 +115,30 @@ async function load(){
   if(!data.companies?.length)box.append(el('div','empty','Nenhuma empresa com conversas registradas.'));
   for(const c of companyConfigs){const stats=(data.companies||[]).find(x=>x.company===c.id)||{conversations:0,paused:0};const card=el('article','company');card.append(el('strong','',c.variables?.NOME_EMPRESA||c.id));card.append(el('div','small muted','ID: '+c.id));card.append(el('div','small muted',stats.conversations+' conversas'));card.append(el('div','small muted',stats.paused+' pausadas'));const actions=el('div','company-actions');const edit=el('button','btn secondary','Editar');edit.type='button';edit.addEventListener('click',()=>editCompany(c));actions.append(edit);card.append(actions);box.append(card)}
   if(!companyConfigs.length)box.append(el('div','empty','Nenhuma empresa cadastrada.'));
-  renderRows();$('updated').textContent='Atualizado em '+new Date().toLocaleTimeString('pt-BR');
+  renderRows();
+  await loadAdminAudit();
+  $('updated').textContent='Atualizado em '+new Date().toLocaleTimeString('pt-BR');
  }catch(e){$('dashboardStatus').textContent=e.message}
 }
+async function loadAdminAudit(){
+ const status=$('adminAuditStatus');const box=$('adminAuditList');status.textContent='Carregando auditoria…';
+ try{
+  const res=await request('/admin/audit?limit=50');
+  if(!res.ok)throw new Error(res.status===401?'Acesso administrativo expirado.':'Não foi possível carregar a auditoria (HTTP '+res.status+').');
+  const logs=(await res.json()).logs||[];box.replaceChildren();
+  for(const log of logs){
+   const item=el('article','company');
+   item.append(el('strong','',log.action||'Evento'));
+   item.append(el('div','small muted',dateLabel(log.created_at)));
+   item.append(el('div','small muted','Empresa: '+(log.company_id||'Plataforma')));
+   if(log.target_type)item.append(el('div','small muted',log.target_type+(log.target_id?' · '+log.target_id:'')));
+   box.append(item);
+  }
+  $('adminAuditEmpty').classList.toggle('hidden',logs.length>0);
+  status.textContent='';
+ }catch(error){status.textContent=error.message}
+}
+$('adminAuditRefresh').addEventListener('click',loadAdminAudit);
 function blankCompany(){
  const variables={NOME_EMPRESA:'',OBJETIVO_FINAL:'',TOM_DE_VOZ:'profissional, cordial e objetivo',EMOJIS:'Use emojis com moderação.',REGRAS_ESPECIFICAS:'',DADOS_INSTITUCIONAIS:'',CATALOGO_PRECOS:'',RESTRICOES:'',LINK_FECHAMENTO:'',PERGUNTA_QUALIFICACAO:'',REGRA_DE_FECHAMENTO:'',DESCRICAO_CURTA_NEGOCIO:''};
  return {phone_number_id:'',token_env:'WA_TOKEN_NOVA_EMPRESA',team_number:'',variables};
