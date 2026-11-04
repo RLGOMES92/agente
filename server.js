@@ -132,8 +132,18 @@ async function handle(company, msg) {
   await notifyCustomer(company, phone, text);
 }
 
+function isAdmin(req) {
+  return Boolean(process.env.ADMIN_TOKEN) && req.get('x-admin-token') === process.env.ADMIN_TOKEN;
+}
+
+app.get('/admin/overview', (req, res) => {
+  if (!isAdmin(req)) return res.sendStatus(401);
+  const limit = Number.parseInt(req.query.limit, 10) || 50;
+  return res.json({ ok: true, ...db.getOverview(limit) });
+});
+
 app.post('/admin/resume', (req, res) => {
-  if (!process.env.ADMIN_TOKEN || req.get('x-admin-token') !== process.env.ADMIN_TOKEN) {
+  if (!isAdmin(req)) {
     return res.sendStatus(401);
   }
   const { company, phone } = req.body || {};
