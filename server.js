@@ -38,7 +38,7 @@ function validateCompanyConfig(id, input) {
   if (!companyIdPattern.test(id) || id.startsWith('_')) return 'Identificador inválido.';
   if (!input || typeof input !== 'object' || Array.isArray(input)) return 'Configuração inválida.';
   if (typeof input.phone_number_id !== 'string' || input.phone_number_id.length > 80) return 'phone_number_id inválido.';
-  if (typeof input.team_number !== 'string' || (input.team_number && !/^\\d{8,15}$/.test(input.team_number))) return 'team_number deve conter de 8 a 15 dígitos.';
+  if (typeof input.team_number !== 'string' || (input.team_number && !/^\d{8,15}$/.test(input.team_number))) return 'team_number deve conter de 8 a 15 dígitos.';
   if (typeof input.token_env !== 'string' || !tokenEnvPattern.test(input.token_env)) return 'token_env inválido.';
   if (!input.variables || typeof input.variables !== 'object' || Array.isArray(input.variables)) return 'variables é obrigatório.';
   for (const key of companyVariableKeys) {
