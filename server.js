@@ -7,8 +7,14 @@ import { loadCompanies, askClaude, parseReply, FALLBACK_HANDOFF } from './agent.
 import { sendText } from './whatsapp.js';
 import * as db from './db.js';
 
-const companies = loadCompanies();
-const byPhoneId = Object.fromEntries(Object.values(companies).filter((c) => c.phone_number_id).map((c) => [c.phone_number_id, c]));
+let companies = loadCompanies();
+let byPhoneId = {};
+function refreshCompanies() {
+  companies = loadCompanies();
+  byPhoneId = Object.fromEntries(Object.values(companies).filter((c) => c.phone_number_id).map((c) => [c.phone_number_id, c]));
+  return companies;
+}
+refreshCompanies();
 console.log('Empresas carregadas:', Object.keys(companies).join(', '));
 for (const company of Object.values(companies)) {
   if (!company.phone_number_id) console.warn(`[CONFIG] ${company.id}: phone_number_id ainda não configurado; WhatsApp não receberá mensagens.`);
