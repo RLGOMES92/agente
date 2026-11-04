@@ -33,6 +33,18 @@ CREATE TABLE IF NOT EXISTS user_sessions (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON user_sessions(expires_at);
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  company_id TEXT,
+  actor_user_id INTEGER,
+  action TEXT NOT NULL,
+  target_type TEXT,
+  target_id TEXT,
+  metadata TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_company_time ON audit_logs(company_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_logs(created_at DESC);
 `);
 
 const q = {
@@ -94,6 +106,11 @@ const userQ = {
     WHERE s.token_hash=? AND s.expires_at>? AND u.active=1`),
   deleteSession: db.prepare('DELETE FROM user_sessions WHERE token_hash=?'),
   purgeSessions: db.prepare('DELETE FROM user_sessions WHERE expires_at<=?'),
+  changePassword: db.prepare('UPDATE users SET password_hash=?,password_salt=? WHERE id=?'),
+  revokeOtherSessions: db.prepare('DELETE FROM user_sessions WHERE user_id=? AND token_hash<>?'),
+  auditInsert: db.prepare('INSERT INTO audit_logs (company_id,actor_user_id,action,target_type,target_id,metadata,created_at) VALUES (?,?,?,?,?,?,?)'),
+  auditGlobal: db.prepare('SELECT id,company_id,actor_user_id,action,target_type,target_id,metadata,created_at FROM audit_logs ORDER BY id DESC LIMIT ?'),
+  auditCompany: db.prepare('SELECT id,company_id,actor_user_id,action,target_type,target_id,metadata,created_at FROM audit_logs WHERE company_id=? ORDER BY id DESC LIMIT ?'),
 };
 export const createUser = (user) => userQ.create.run(user.email,user.password_hash,user.password_salt,user.role,user.company_id,Date.now()).lastInsertRowid;
 export const getUserByEmail = (email) => userQ.byEmail.get(email);
@@ -104,6 +121,13 @@ export const createUserSession = (hash,userId,expiresAt) => userQ.saveSession.ru
 export const getSessionUser = (hash) => userQ.session.get(hash,Date.now());
 export const deleteUserSession = (hash) => userQ.deleteSession.run(hash);
 export const purgeUserSessions = () => userQ.purgeSessions.run(Date.now());
+export const changeUserPassword = (id, hash, salt) => userQ.changePassword.run(hash, salt, id);
+export const revokeOtherUserSessions = (id, keepHash) => userQ.revokeOtherSessions.run(id, keepHash);
+export const addAuditLog = ({ company_id = null, actor_user_id = null, action, target_type = null, target_id = null, metadata = {} }) =>
+  userQ.auditInsert.run(company_id, actor_user_id, action, target_type, target_id, JSON.stringify(metadata), Date.now());
+const parseAudit = (row) => ({ ...row, metadata: (() => { try { return JSON.parse(row.metadata); } catch { return {}; } })() });
+export const getAuditLogs = (limit = 100) => userQ.auditGlobal.all(Math.min(200, Math.max(1, Number(limit) || 100))).map(parseAudit);
+export const getCompanyAuditLogs = (companyId, limit = 100) => userQ.auditCompany.all(companyId, Math.min(200, Math.max(1, Number(limit) || 100))).map(parseAudit);
 
 export const getCompanyOverview = (companyId, limit = 50) => ({
   companies: q.statsByCompany.all(companyId),
