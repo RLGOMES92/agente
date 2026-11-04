@@ -19,6 +19,8 @@ const q = {
   isPaused: db.prepare('SELECT paused FROM conversations WHERE company=? AND phone=?'),
   setPaused: db.prepare(`INSERT INTO conversations (company, phone, paused, updated) VALUES (?,?,?,?)
     ON CONFLICT(company, phone) DO UPDATE SET paused=excluded.paused, updated=excluded.updated`),
+  touch: db.prepare(`INSERT INTO conversations (company, phone, paused, updated) VALUES (?,?,0,?)
+    ON CONFLICT(company, phone) DO UPDATE SET updated=excluded.updated`),
   add: db.prepare('INSERT INTO messages (company, phone, role, content, ts) VALUES (?,?,?,?,?)'),
   hist: db.prepare('SELECT role, content FROM messages WHERE company=? AND phone=? ORDER BY id DESC LIMIT ?'),
   clear: db.prepare('DELETE FROM messages WHERE company=? AND phone=?'),
@@ -35,6 +37,7 @@ const q = {
 
 export const isPaused = (c, p) => !!q.isPaused.get(c, p)?.paused;
 export const setPaused = (c, p, v) => q.setPaused.run(c, p, v ? 1 : 0, Date.now());
+export const touchConversation = (c, p) => q.touch.run(c, p, Date.now());
 export const addMessage = (c, p, role, content) => q.add.run(c, p, role, content, Date.now());
 export const getHistory = (c, p, n = 20) => q.hist.all(c, p, n).reverse();
 export const clearHistory = (c, p) => q.clear.run(c, p);
