@@ -21,6 +21,12 @@
  <p class="muted">Informe o token administrativo configurado no servidor para consultar a operação.</p>
  <form id="loginForm"><label class="small" for="token">ADMIN_TOKEN</label><div class="field"><input id="token" class="input" type="password" autocomplete="current-password" required placeholder="Seu token administrativo"><button class="btn" type="submit">Entrar</button></div></form>
  <div id="loginStatus" class="status" role="status"></div>
+ <div class="section-head"><h2>Acesso da equipe</h2></div>
+ <form id="tenantLoginForm">
+  <label class="small" for="tenantEmail">E-mail da empresa</label>
+  <div class="field"><input id="tenantEmail" class="input" type="email" autocomplete="username" required placeholder="voce@empresa.com"><input id="tenantPassword" class="input" type="password" autocomplete="current-password" required placeholder="Senha da equipe"><button class="btn" type="submit">Entrar na empresa</button></div>
+ </form>
+ <div id="tenantLoginStatus" class="status" role="status"></div>
 </section>
 <section id="dashboard" class="hidden">
  <div class="section-head"><div><h1 style="font-size:25px;margin:0 0 5px">Visão geral</h1><div class="muted small" id="updated">Aguardando dados…</div></div><div class="toolbar"><input id="filter" class="input" type="search" placeholder="Filtrar empresa ou telefone"><button id="refresh" class="btn secondary" type="button">Atualizar</button></div></div>
@@ -41,10 +47,29 @@
  <div id="dashboardStatus" class="status" role="status"></div>
  <div class="foot">Atualização automática a cada 30 segundos. Os dados exibidos dependem das mensagens processadas e armazenadas no servidor.</div>
 </section>
+<section id="tenantDashboard" class="hidden">
+ <div class="section-head"><div><h1 style="font-size:25px;margin:0 0 5px">Área da empresa</h1><div class="muted small" id="tenantIdentity">Sessão autenticada</div></div><button id="tenantRefresh" class="btn secondary" type="button">Atualizar</button></div>
+ <div class="cards">
+  <article class="panel"><div class="metric-label">Conversas</div><div id="tenantMetricConversations" class="metric">—</div></article>
+  <article class="panel"><div class="metric-label">Atendimentos pausados</div><div id="tenantMetricPaused" class="metric">—</div></article>
+ </div>
+ <div class="section-head"><h2>Conversas recentes da empresa</h2></div>
+ <div class="panel table-wrap"><table class="table"><thead><tr><th>Cliente</th><th>Status</th><th>Última atividade</th><th>Última mensagem</th></tr></thead><tbody id="tenantConversations"></tbody></table><div id="tenantEmpty" class="empty hidden">Nenhuma conversa registrada.</div></div>
+ <section id="tenantTeamPanel" class="panel editor hidden">
+  <div class="section-head"><div><h2>Equipe</h2><p class="muted small">Gerencie operadores e visualizadores vinculados somente a esta empresa.</p></div></div>
+  <form id="tenantUserForm">
+   <div class="editor-grid"><div><label class="small" for="newUserEmail">E-mail</label><input id="newUserEmail" class="input" type="email" required></div><div><label class="small" for="newUserPassword">Senha inicial (mínimo 12 caracteres)</label><input id="newUserPassword" class="input" type="password" minlength="12" required></div></div>
+   <div class="actions" style="margin-top:12px"><select id="newUserRole" class="input"><option value="operator">Operador</option><option value="viewer">Visualizador</option></select><button class="btn" type="submit">Adicionar usuário</button></div>
+  </form>
+  <div id="tenantTeamStatus" class="status" role="status"></div>
+  <div id="tenantUsers" class="company-grid"></div>
+ </section>
+ <div id="tenantStatus" class="status" role="status"></div>
+</section>
 </main>
 <script>
 const $=id=>document.getElementById(id);
-let token=sessionStorage.getItem('veyrion_admin_token')||'';
+let token=sessionStorage.getItem('veyrion_admin_token')||'';\nlet tenantToken=sessionStorage.getItem('veyrion_tenant_token')||'';\nlet tenantUser=null;
 let rows=[];
 let companyConfigs=[];
 let editingCompany=null;
@@ -101,7 +126,48 @@ $('saveCompany').addEventListener('click',async()=>{
  finally{button.disabled=false}
 });
 
-function renderRows(){
+function tenantRequest(url,options={}){return fetch(url,{...options,headers:{'Authorization':'Bearer '+tenantToken,'Content-Type':'application/json',...(options.headers||{})}})}
+function showTenant(on){$('login').classList.toggle('hidden',on);$('dashboard').classList.add('hidden');$('tenantDashboard').classList.toggle('hidden',!on);$('logout').classList.toggle('hidden',!on)}
+async function loadTenant(){
+ $('tenantStatus').textContent='';
+ try{
+  const res=await tenantRequest('/tenant/overview');
+  if(res.status===401){sessionStorage.removeItem('veyrion_tenant_token');tenantToken='';showTenant(false);$('tenantLoginStatus').textContent='Sessão expirada. Entre novamente.';return}
+  if(!res.ok)throw new Error('Não foi possível carregar os dados da empresa.');
+  const data=await res.json();const stats=(data.companies||[])[0]||{conversations:0,paused:0};
+  $('tenantMetricConversations').textContent=String(stats.conversations||0);$('tenantMetricPaused').textContent=String(stats.paused||0);
+  $('tenantIdentity').textContent=(tenantUser?.email||'Usuário')+' · '+data.company_id;
+  const body=$('tenantConversations');body.replaceChildren();
+  for(const row of data.recent||[]){const tr=document.createElement('tr');tr.append(el('td','', '+'+row.phone));tr.append(el('td','',row.paused?'Pausado':'Ativo'));tr.append(el('td','',dateLabel(row.last_message_at||row.updated)));tr.append(el('td','',row.last_message||'Sem mensagem'));body.append(tr)}
+  $('tenantEmpty').classList.toggle('hidden',(data.recent||[]).length>0);
+  const team=$('tenantTeamPanel');
+  if(tenantUser?.role==='company_admin'){
+   team.classList.remove('hidden');const usersRes=await tenantRequest('/tenant/users');
+   if(!usersRes.ok)throw new Error('Não foi possível carregar a equipe.');
+   const users=(await usersRes.json()).users||[];const box=$('tenantUsers');box.replaceChildren();
+   for(const u of users){const card=el('article','company');card.append(el('strong','',u.email));card.append(el('div','small muted',u.role+' · '+(u.active?'Ativo':'Desativado')));if(u.active&&u.id!==tenantUser.id&&['operator','viewer'].includes(u.role)){const btn=el('button','btn secondary','Desativar');btn.type='button';btn.addEventListener('click',()=>disableTenantUser(u.id,btn));card.append(btn)}box.append(card)}
+  }else team.classList.add('hidden');
+ }catch(error){$('tenantStatus').textContent=error.message}
+}
+async function disableTenantUser(id,button){
+ if(!confirm('Desativar este usuário? As sessões dele serão encerradas.'))return;
+ button.disabled=true;
+ try{const res=await tenantRequest('/tenant/users/'+id+'/disable',{method:'POST'});if(!res.ok)throw new Error('Não foi possível desativar o usuário.');await loadTenant()}
+ catch(error){$('tenantTeamStatus').textContent=error.message;button.disabled=false}
+}
+$('tenantLoginForm').addEventListener('submit',async event=>{
+ event.preventDefault();$('tenantLoginStatus').textContent='Autenticando…';
+ try{const res=await fetch('/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('tenantEmail').value.trim(),password:$('tenantPassword').value})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Falha no login.');
+ tenantToken=data.token;tenantUser=data.user;sessionStorage.setItem('veyrion_tenant_token',tenantToken);$('tenantPassword').value='';$('tenantLoginStatus').textContent='';showTenant(true);await loadTenant();
+ }catch(error){$('tenantLoginStatus').textContent=error.message}
+});
+$('tenantUserForm').addEventListener('submit',async event=>{
+ event.preventDefault();$('tenantTeamStatus').textContent='Criando usuário…';
+ try{const res=await tenantRequest('/tenant/users',{method:'POST',body:JSON.stringify({email:$('newUserEmail').value.trim(),password:$('newUserPassword').value,role:$('newUserRole').value})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Não foi possível criar usuário.');$('newUserEmail').value='';$('newUserPassword').value='';$('tenantTeamStatus').textContent='Usuário criado.';await loadTenant()}
+ catch(error){$('tenantTeamStatus').textContent=error.message}
+});
+$('tenantRefresh').addEventListener('click',loadTenant);
+\nfunction renderRows(){
  const body=$('conversations');body.replaceChildren();const q=$('filter').value.trim().toLowerCase();
  const filtered=rows.filter(r=>(r.company+' '+r.phone).toLowerCase().includes(q));
  $('empty').classList.toggle('hidden',filtered.length>0);
@@ -126,7 +192,7 @@ async function resume(company,phone,button){
 $('loginForm').addEventListener('submit',async e=>{e.preventDefault();token=$('token').value.trim();if(!token)return;const res=await request('/admin/overview?limit=1');if(!res.ok){$('loginStatus').textContent=res.status===401?'Token inválido.':'Falha ao conectar ao servidor.';token='';return}sessionStorage.setItem('veyrion_admin_token',token);$('token').value='';$('loginStatus').textContent='';showDashboard(true);await load()});
 $('logout').addEventListener('click',()=>{sessionStorage.removeItem('veyrion_admin_token');token='';rows=[];showDashboard(false)});
 $('refresh').addEventListener('click',load);$('filter').addEventListener('input',renderRows);
-if(token){showDashboard(true);load()}else showDashboard(false);
+if(tenantToken){fetch('/auth/me',{headers:{'Authorization':'Bearer '+tenantToken}}).then(r=>r.ok?r.json():Promise.reject()).then(data=>{tenantUser=data.user;showTenant(true);loadTenant()}).catch(()=>{sessionStorage.removeItem('veyrion_tenant_token');tenantToken='';showDashboard(false)})}else if(token){showDashboard(true);load()}else showDashboard(false);
 setInterval(()=>{if(token&&!$('dashboard').classList.contains('hidden'))load()},30000);
 </script>
 </body>
