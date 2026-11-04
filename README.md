@@ -74,7 +74,9 @@ O histórico e a deduplicação de webhooks ficam no SQLite. Em hospedagens com 
 
 Endpoints:
 - `GET /health`: verificação simples de disponibilidade.
+- `GET /admin/overview`: resumo de operação protegido por `ADMIN_TOKEN` no header `x-admin-token`.
 - `GET /webhook` e `POST /webhook`: verificação e recebimento de eventos da Meta.
+- `GET /admin/overview`: visão administrativa autenticada por `x-admin-token`, com totais por empresa e até 100 conversas recentes (sem expor credenciais ou histórico completo).
 - `POST /admin/resume`: reativação autenticada de conversa.
 
 ## 6. Segurança
