@@ -69,7 +69,9 @@
 </main>
 <script>
 const $=id=>document.getElementById(id);
-let token=sessionStorage.getItem('veyrion_admin_token')||'';\nlet tenantToken=sessionStorage.getItem('veyrion_tenant_token')||'';\nlet tenantUser=null;
+let token=sessionStorage.getItem('veyrion_admin_token')||'';
+let tenantToken=sessionStorage.getItem('veyrion_tenant_token')||'';
+let tenantUser=null;
 let rows=[];
 let companyConfigs=[];
 let editingCompany=null;
@@ -167,7 +169,8 @@ $('tenantUserForm').addEventListener('submit',async event=>{
  catch(error){$('tenantTeamStatus').textContent=error.message}
 });
 $('tenantRefresh').addEventListener('click',loadTenant);
-\nfunction renderRows(){
+
+function renderRows(){
  const body=$('conversations');body.replaceChildren();const q=$('filter').value.trim().toLowerCase();
  const filtered=rows.filter(r=>(r.company+' '+r.phone).toLowerCase().includes(q));
  $('empty').classList.toggle('hidden',filtered.length>0);
@@ -190,7 +193,7 @@ async function resume(company,phone,button){
  catch(e){$('dashboardStatus').textContent=e.message;button.disabled=false}
 }
 $('loginForm').addEventListener('submit',async e=>{e.preventDefault();token=$('token').value.trim();if(!token)return;const res=await request('/admin/overview?limit=1');if(!res.ok){$('loginStatus').textContent=res.status===401?'Token inválido.':'Falha ao conectar ao servidor.';token='';return}sessionStorage.setItem('veyrion_admin_token',token);$('token').value='';$('loginStatus').textContent='';showDashboard(true);await load()});
-$('logout').addEventListener('click',()=>{sessionStorage.removeItem('veyrion_admin_token');token='';rows=[];showDashboard(false)});
+$('logout').addEventListener('click',async()=>{if(tenantToken){await tenantRequest('/auth/logout',{method:'POST'}).catch(()=>{});sessionStorage.removeItem('veyrion_tenant_token');tenantToken='';tenantUser=null}sessionStorage.removeItem('veyrion_admin_token');token='';rows=[];showDashboard(false);showTenant(false)});
 $('refresh').addEventListener('click',load);$('filter').addEventListener('input',renderRows);
 if(tenantToken){fetch('/auth/me',{headers:{'Authorization':'Bearer '+tenantToken}}).then(r=>r.ok?r.json():Promise.reject()).then(data=>{tenantUser=data.user;showTenant(true);loadTenant()}).catch(()=>{sessionStorage.removeItem('veyrion_tenant_token');tenantToken='';showDashboard(false)})}else if(token){showDashboard(true);load()}else showDashboard(false);
 setInterval(()=>{if(token&&!$('dashboard').classList.contains('hidden'))load()},30000);
