@@ -237,13 +237,10 @@ app.post('/auth/login', async (req, res) => {
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   if (!email || email.length > 254 || password.length > 1024) return res.status(400).json({ ok: false, error: 'Credenciais inválidas.' });
   const user = db.getUserByEmail(email);
-  if (!user || !user.active) {
-    recordLoginFailure(ip);
-    return res.status(401).json({ ok: false, error: 'E-mail ou senha inválidos.' });
-  }
-  const candidate = await scrypt(password, user.password_salt, 64);
-  const expected = Buffer.from(user.password_hash, 'hex');
-  if (expected.length !== candidate.length || !crypto.timingSafeEqual(expected, candidate)) {
+  const salt = user?.password_salt || 'veyrion-login-dummy-salt';
+  const candidate = await scrypt(password, salt, 64);
+  const expected = user ? Buffer.from(user.password_hash, 'hex') : Buffer.alloc(64);
+  if (!user || !user.active || expected.length !== candidate.length || !crypto.timingSafeEqual(expected, candidate)) {
     recordLoginFailure(ip);
     return res.status(401).json({ ok: false, error: 'E-mail ou senha inválidos.' });
   }
@@ -438,4 +435,5 @@ app.use((error, _req, res, _next) => {
 });
 
 setInterval(db.purgeSeen, 3600 * 1000).unref();
+setInterval(db.purgeUserSessions, 3600 * 1000).unref();
 app.listen(process.env.PORT || 3000, () => console.log('Agente no ar'));
