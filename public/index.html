@@ -159,7 +159,7 @@ async function disableTenantUser(id,button){
 }
 $('tenantLoginForm').addEventListener('submit',async event=>{
  event.preventDefault();$('tenantLoginStatus').textContent='Autenticando…';
- try{const res=await fetch('/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('tenantEmail').value.trim(),password:$('tenantPassword').value})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Falha no login.');
+ try{const res=await fetch('/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('tenantEmail').value.trim(),password:$('tenantPassword').value})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Falha no login.');if(data.user?.role==='platform_admin'){await fetch('/auth/logout',{method:'POST',headers:{'Authorization':'Bearer '+data.token}});throw new Error('Use o acesso administrativo com ADMIN_TOKEN para entrar como administrador da plataforma.')}
  tenantToken=data.token;tenantUser=data.user;sessionStorage.setItem('veyrion_tenant_token',tenantToken);$('tenantPassword').value='';$('tenantLoginStatus').textContent='';showTenant(true);await loadTenant();
  }catch(error){$('tenantLoginStatus').textContent=error.message}
 });
