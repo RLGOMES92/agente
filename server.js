@@ -218,14 +218,21 @@ function sessionUser(req) {
   if (!token || token.length > 200) return null;
   return db.getSessionUser(crypto.createHash('sha256').update(token).digest('hex')) || null;
 }
-function loginBlocked(ip) {
-  const entry = loginAttempts.get(ip);
-  if (!entry) return false;
-  if (Date.now() - entry.startedAt > 15 * 60 * 1000) {
-    loginAttempts.delete(ip);
-    return false;
-  }
-  return entry.count >= 8;
+function loginKeys(ip, email) {
+  const emailKey = crypto.createHash('sha256').update(String(email || '').toLowerCase()).digest('hex');
+  return [`ip:${ip}`, `email:${emailKey}`];
+}
+function loginBlocked(keys) {
+  const now = Date.now();
+  return keys.some((key) => {
+    const entry = loginAttempts.get(key);
+    if (!entry) return false;
+    if (now - entry.startedAt > 15 * 60 * 1000) {
+      loginAttempts.delete(key);
+      return false;
+    }
+    return entry.count >= 8;
+  });
 }
 function audit(action, user = null, targetType = null, targetId = null, metadata = {}) {
   try {
@@ -239,17 +246,20 @@ function audit(action, user = null, targetType = null, targetId = null, metadata
     console.error('[AUDITORIA] Falha ao registrar evento:', error.message);
   }
 }
-function recordLoginFailure(ip) {
+function recordLoginFailure(keys) {
   const now = Date.now();
-  const entry = loginAttempts.get(ip);
-  if (!entry || now - entry.startedAt > 15 * 60 * 1000) loginAttempts.set(ip, { count: 1, startedAt: now });
-  else entry.count += 1;
+  for (const key of keys) {
+    const entry = loginAttempts.get(key);
+    if (!entry || now - entry.startedAt > 15 * 60 * 1000) loginAttempts.set(key, { count: 1, startedAt: now });
+    else entry.count += 1;
+  }
 }
 
 app.post('/auth/login', async (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  if (loginBlocked(ip)) return res.status(429).json({ ok: false, error: 'Muitas tentativas. Aguarde 15 minutos.' });
   const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+  const keys = loginKeys(ip, email);
+  if (loginBlocked(keys)) return res.status(429).json({ ok: false, error: 'Muitas tentativas. Aguarde 15 minutos.' });
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   if (!email || email.length > 254 || password.length > 1024) return res.status(400).json({ ok: false, error: 'Credenciais inválidas.' });
   const user = db.getUserByEmail(email);
@@ -257,10 +267,10 @@ app.post('/auth/login', async (req, res) => {
   const candidate = await scrypt(password, salt, 64);
   const expected = user ? Buffer.from(user.password_hash, 'hex') : Buffer.alloc(64);
   if (!user || !user.active || expected.length !== candidate.length || !crypto.timingSafeEqual(expected, candidate)) {
-    recordLoginFailure(ip);
+    recordLoginFailure(keys);
     return res.status(401).json({ ok: false, error: 'E-mail ou senha inválidos.' });
   }
-  loginAttempts.delete(ip);
+  for (const key of keys) loginAttempts.delete(key);
   const token = crypto.randomBytes(32).toString('base64url');
   const expiresAt = Date.now() + SESSION_TTL_MS;
   db.createUserSession(crypto.createHash('sha256').update(token).digest('hex'), user.id, expiresAt);
