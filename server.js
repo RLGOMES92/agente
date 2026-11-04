@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
@@ -24,6 +25,53 @@ if (!process.env.APP_SECRET) console.warn('[SEGURANÇA] APP_SECRET ausente: vali
 
 const app = express();
 const root = path.dirname(fileURLToPath(import.meta.url));
+const companiesDir = path.join(root, 'companies');
+const companyIdPattern = /^[a-z0-9][a-z0-9_-]{0,39}$/;
+const tokenEnvPattern = /^[A-Z][A-Z0-9_]{2,63}$/;
+const companyVariableKeys = [
+  'NOME_EMPRESA', 'OBJETIVO_FINAL', 'TOM_DE_VOZ', 'EMOJIS',
+  'REGRAS_ESPECIFICAS', 'DADOS_INSTITUCIONAIS', 'CATALOGO_PRECOS',
+  'RESTRICOES', 'LINK_FECHAMENTO', 'PERGUNTA_QUALIFICACAO',
+  'REGRA_DE_FECHAMENTO', 'DESCRICAO_CURTA_NEGOCIO',
+];
+function validateCompanyConfig(id, input) {
+  if (!companyIdPattern.test(id) || id.startsWith('_')) return 'Identificador inválido.';
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return 'Configuração inválida.';
+  if (typeof input.phone_number_id !== 'string' || input.phone_number_id.length > 80) return 'phone_number_id inválido.';
+  if (typeof input.team_number !== 'string' || (input.team_number && !/^\\d{8,15}$/.test(input.team_number))) return 'team_number deve conter de 8 a 15 dígitos.';
+  if (typeof input.token_env !== 'string' || !tokenEnvPattern.test(input.token_env)) return 'token_env inválido.';
+  if (!input.variables || typeof input.variables !== 'object' || Array.isArray(input.variables)) return 'variables é obrigatório.';
+  for (const key of companyVariableKeys) {
+    const value = input.variables[key];
+    if (typeof value !== 'string' || !value.trim() || value.length > 4000) return `Campo variables.${key} inválido.`;
+  }
+  const duplicate = Object.values(companies).find((company) => company.id !== id && input.phone_number_id && company.phone_number_id === input.phone_number_id);
+  if (duplicate) return 'Este phone_number_id já está associado a outra empresa.';
+  return null;
+}
+function safeCompanyConfig(company) {
+  return {
+    id: company.id,
+    phone_number_id: company.phone_number_id || '',
+    token_env: company.token_env,
+    team_number: company.team_number || '',
+    variables: company.variables || {},
+  };
+}
+async function writeCompanyConfig(id, input) {
+  const destination = path.join(companiesDir, `${id}.json`);
+  const temporary = path.join(companiesDir, `.${id}.json.tmp`);
+  const config = {
+    id,
+    phone_number_id: input.phone_number_id || '',
+    token_env: input.token_env,
+    team_number: input.team_number || '',
+    variables: input.variables,
+  };
+  await fs.writeFile(temporary, JSON.stringify(config, null, 2) + '\\n', { mode: 0o600 });
+  await fs.rename(temporary, destination);
+}
+
 app.use('/painel', express.static(path.join(root, 'public'), { index: 'index.html', maxAge: '1h' }));
 app.use(express.json({ limit: '1mb', verify: (req, _res, buf) => { req.raw = buf; } }));
 
@@ -146,6 +194,46 @@ async function handle(company, msg) {
 function isAdmin(req) {
   return Boolean(process.env.ADMIN_TOKEN) && req.get('x-admin-token') === process.env.ADMIN_TOKEN;
 }
+
+app.get('/admin/companies', (req, res) => {
+  if (!isAdmin(req)) return res.sendStatus(401);
+  res.set('Cache-Control', 'no-store');
+  refreshCompanies();
+  return res.json({ ok: true, companies: Object.values(companies).map(safeCompanyConfig) });
+});
+
+app.post('/admin/companies', async (req, res) => {
+  if (!isAdmin(req)) return res.sendStatus(401);
+  const { id, ...config } = req.body || {};
+  if (typeof id !== 'string' || companies[id]) return res.status(400).json({ ok: false, error: 'ID inválido ou já cadastrado.' });
+  const error = validateCompanyConfig(id, config);
+  if (error) return res.status(400).json({ ok: false, error });
+  try {
+    await writeCompanyConfig(id, config);
+    refreshCompanies();
+    return res.status(201).json({ ok: true, company: safeCompanyConfig(companies[id]) });
+  } catch (cause) {
+    console.error('[ADMIN] Falha ao cadastrar empresa:', cause);
+    return res.status(500).json({ ok: false, error: 'Não foi possível salvar a empresa.' });
+  }
+});
+
+app.put('/admin/companies/:id', async (req, res) => {
+  if (!isAdmin(req)) return res.sendStatus(401);
+  const { id } = req.params;
+  refreshCompanies();
+  if (!companies[id] || id.startsWith('_')) return res.sendStatus(404);
+  const error = validateCompanyConfig(id, req.body);
+  if (error) return res.status(400).json({ ok: false, error });
+  try {
+    await writeCompanyConfig(id, req.body);
+    refreshCompanies();
+    return res.json({ ok: true, company: safeCompanyConfig(companies[id]) });
+  } catch (cause) {
+    console.error('[ADMIN] Falha ao atualizar empresa:', cause);
+    return res.status(500).json({ ok: false, error: 'Não foi possível atualizar a empresa.' });
+  }
+});
 
 app.get('/admin/overview', (req, res) => {
   if (!isAdmin(req)) return res.sendStatus(401);
