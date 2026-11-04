@@ -72,6 +72,11 @@ O envio de mensagens de texto pela API da Meta depende da janela de atendimento 
 
 O histórico e a deduplicação de webhooks ficam no SQLite. Em hospedagens com disco efêmero, configure um volume persistente e defina `DB_PATH` para um caminho dentro dele. O Dockerfile usa `/data/agente.db`.
 
+Painel administrativo:
+- Abra `https://SEU-DOMINIO/painel/` no navegador.
+- Informe o `ADMIN_TOKEN`; o token fica somente na sessão atual do navegador.
+- O painel consulta `/admin/overview`, atualiza os indicadores automaticamente e permite reativar conversas pausadas. A reativação limpa o histórico da conversa.
+
 Endpoints:
 - `GET /health`: verificação simples de disponibilidade.
 - `GET /admin/overview`: resumo de operação protegido por `ADMIN_TOKEN` no header `x-admin-token`.
