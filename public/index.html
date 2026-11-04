@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Painel | Agente Multiempresa</title>
+<style>
+:root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172033;background:#f3f6fb;font-synthesis:none}
+*{box-sizing:border-box}body{margin:0}button,input{font:inherit}.shell{max-width:1180px;margin:auto;padding:28px 20px 56px}.top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:24px}.brand{display:flex;align-items:center;gap:12px}.mark{width:42px;height:42px;border-radius:14px;background:#263c70;color:white;display:grid;place-items:center;font-weight:800}.muted{color:#68748a}.small{font-size:13px}.panel{background:white;border:1px solid #e3e9f2;border-radius:18px;padding:20px;box-shadow:0 8px 30px #1c31500a}.login{max-width:460px;margin:9vh auto}.login h2{margin-top:0}.field{display:flex;gap:8px;margin-top:14px}.field input{flex:1;min-width:0}.input{border:1px solid #d6deeb;border-radius:10px;padding:12px 13px;background:white;color:#172033}.btn{border:0;border-radius:10px;padding:11px 15px;background:#263c70;color:white;font-weight:650;cursor:pointer}.btn:disabled{opacity:.55;cursor:wait}.btn.secondary{background:#edf1f8;color:#263c70}.btn.danger{background:#fff0ed;color:#a33a28}.status{font-size:13px;min-height:20px;margin-top:10px;color:#a33a28}.hidden{display:none!important}.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:18px 0}.metric{font-size:30px;font-weight:800;letter-spacing:-1px;margin-top:8px}.metric-label{font-size:13px;color:#68748a}.section-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:26px 0 12px}.section-head h2{font-size:18px;margin:0}.company-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.company{border:1px solid #e5eaf2;border-radius:14px;padding:15px}.company strong{display:block;margin-bottom:7px}.table-wrap{overflow:auto}.table{width:100%;border-collapse:collapse;min-width:680px}.table th,.table td{text-align:left;padding:13px 11px;border-bottom:1px solid #edf0f5;vertical-align:middle;font-size:13px}.table th{color:#68748a;font-weight:650}.pill{display:inline-block;padding:5px 9px;border-radius:999px;font-size:12px;font-weight:700}.pill.paused{background:#fff0e8;color:#a34a1c}.pill.active{background:#e8f7ef;color:#197247}.actions{display:flex;align-items:center;gap:8px}.toolbar{display:flex;gap:9px;align-items:center}.toolbar input{width:min(280px,55vw)}.empty{padding:28px;text-align:center;color:#68748a}.foot{margin-top:16px;color:#7b879b;font-size:12px}@media(max-width:700px){.shell{padding:18px 13px 36px}.top{align-items:flex-start}.cards{grid-template-columns:1fr}.company-grid{grid-template-columns:1fr 1fr}.field{flex-direction:column}.section-head{align-items:flex-start;flex-direction:column}.toolbar{width:100%}.toolbar input{flex:1;width:auto}}@media(max-width:420px){.company-grid{grid-template-columns:1fr}.top .btn{padding:9px 10px}}
+</style>
+</head>
+<body>
+<main class="shell">
+<header class="top">
+ <div class="brand"><div class="mark">V</div><div><strong>VEYRION · Operações</strong><div class="muted small">Painel do agente multiempresa</div></div></div>
+ <button id="logout" class="btn secondary hidden" type="button">Sair</button>
+</header>
+<section id="login" class="panel login">
+ <h2>Acesso administrativo</h2>
+ <p class="muted">Informe o token administrativo configurado no servidor para consultar a operação.</p>
+ <form id="loginForm"><label class="small" for="token">ADMIN_TOKEN</label><div class="field"><input id="token" class="input" type="password" autocomplete="current-password" required placeholder="Seu token administrativo"><button class="btn" type="submit">Entrar</button></div></form>
+ <div id="loginStatus" class="status" role="status"></div>
+</section>
+<section id="dashboard" class="hidden">
+ <div class="section-head"><div><h1 style="font-size:25px;margin:0 0 5px">Visão geral</h1><div class="muted small" id="updated">Aguardando dados…</div></div><div class="toolbar"><input id="filter" class="input" type="search" placeholder="Filtrar empresa ou telefone"><button id="refresh" class="btn secondary" type="button">Atualizar</button></div></div>
+ <div class="cards">
+  <article class="panel"><div class="metric-label">Empresas cadastradas</div><div id="metricCompanies" class="metric">—</div></article>
+  <article class="panel"><div class="metric-label">Conversas registradas</div><div id="metricConversations" class="metric">—</div></article>
+  <article class="panel"><div class="metric-label">Atendimentos pausados</div><div id="metricPaused" class="metric">—</div></article>
+ </div>
+ <div class="section-head"><h2>Empresas</h2></div><div id="companies" class="company-grid"></div>
+ <div class="section-head"><h2>Conversas recentes</h2><span class="muted small">Até 100 registros</span></div>
+ <div class="panel table-wrap"><table class="table"><thead><tr><th>Empresa</th><th>Cliente</th><th>Status</th><th>Última atividade</th><th>Última mensagem</th><th>Ação</th></tr></thead><tbody id="conversations"></tbody></table><div id="empty" class="empty hidden">Nenhuma conversa encontrada.</div></div>
+ <div id="dashboardStatus" class="status" role="status"></div>
+ <div class="foot">Atualização automática a cada 30 segundos. Os dados exibidos dependem das mensagens processadas e armazenadas no servidor.</div>
+</section>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let token=sessionStorage.getItem('veyrion_admin_token')||'';
+let rows=[];
+function showDashboard(on){$('login').classList.toggle('hidden',on);$('dashboard').classList.toggle('hidden',!on);$('logout').classList.toggle('hidden',!on)}
+function dateLabel(value){if(!value)return '—';const d=new Date(Number(value));return Number.isNaN(d.getTime())?'—':d.toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'})}
+function el(tag,cls,txt){const n=document.createElement(tag);if(cls)n.className=cls;if(txt!==undefined)n.textContent=txt;return n}
+async function request(url,options={}){return fetch(url,{...options,headers:{'x-admin-token':token,'Content-Type':'application/json',...(options.headers||{})}})}
+async function load(){
+ $('dashboardStatus').textContent='';
+ try{
+  const res=await request('/admin/overview?limit=100');
+  if(res.status===401){sessionStorage.removeItem('veyrion_admin_token');token='';showDashboard(false);$('loginStatus').textContent='Token inválido ou não configurado no servidor.';return}
+  if(!res.ok)throw new Error('Não foi possível consultar o painel (HTTP '+res.status+').');
+  const data=await res.json();rows=data.recent||[];
+  $('metricCompanies').textContent=String((data.companies||[]).length);
+  $('metricConversations').textContent=String((data.companies||[]).reduce((n,c)=>n+Number(c.conversations||0),0));
+  $('metricPaused').textContent=String((data.companies||[]).reduce((n,c)=>n+Number(c.paused||0),0));
+  const box=$('companies');box.replaceChildren();
+  if(!data.companies?.length)box.append(el('div','empty','Nenhuma empresa com conversas registradas.'));
+  for(const c of data.companies||[]){const card=el('article','company');card.append(el('strong','',c.company));card.append(el('div','small muted',c.conversations+' conversas'));card.append(el('div','small muted',c.paused+' pausadas'));box.append(card)}
+  renderRows();$('updated').textContent='Atualizado em '+new Date().toLocaleTimeString('pt-BR');
+ }catch(e){$('dashboardStatus').textContent=e.message}
+}
+function renderRows(){
+ const body=$('conversations');body.replaceChildren();const q=$('filter').value.trim().toLowerCase();
+ const filtered=rows.filter(r=>(r.company+' '+r.phone).toLowerCase().includes(q));
+ $('empty').classList.toggle('hidden',filtered.length>0);
+ for(const r of filtered){
+  const tr=document.createElement('tr');
+  for(const value of [r.company,'+'+r.phone])tr.append(el('td','',value));
+  const state=el('td');state.append(el('span','pill '+(r.paused?'paused':'active'),r.paused?'Pausado':'Ativo'));tr.append(state);
+  tr.append(el('td','',dateLabel(r.last_message_at||r.updated)));
+  tr.append(el('td','',r.last_message||'Sem mensagem registrada'));
+  const action=el('td');const wrap=el('div','actions');
+  if(r.paused){const btn=el('button','btn secondary','Reativar');btn.type='button';btn.addEventListener('click',()=>resume(r.company,r.phone,btn));wrap.append(btn)}
+  else wrap.append(el('span','muted small','—'));
+  action.append(wrap);tr.append(action);body.append(tr)
+ }
+}
+async function resume(company,phone,button){
+ if(!confirm('Reativar o agente para +'+phone+'? O histórico dessa conversa será limpo.'))return;
+ button.disabled=true;
+ try{const res=await request('/admin/resume',{method:'POST',body:JSON.stringify({company,phone})});if(!res.ok)throw new Error(res.status===401?'Acesso não autorizado.':'Não foi possível reativar (HTTP '+res.status+').');await load()}
+ catch(e){$('dashboardStatus').textContent=e.message;button.disabled=false}
+}
+$('loginForm').addEventListener('submit',async e=>{e.preventDefault();token=$('token').value.trim();if(!token)return;const res=await request('/admin/overview?limit=1');if(!res.ok){$('loginStatus').textContent=res.status===401?'Token inválido.':'Falha ao conectar ao servidor.';token='';return}sessionStorage.setItem('veyrion_admin_token',token);$('token').value='';$('loginStatus').textContent='';showDashboard(true);await load()});
+$('logout').addEventListener('click',()=>{sessionStorage.removeItem('veyrion_admin_token');token='';rows=[];showDashboard(false)});
+$('refresh').addEventListener('click',load);$('filter').addEventListener('input',renderRows);
+if(token){showDashboard(true);load()}else showDashboard(false);
+setInterval(()=>{if(token&&!$('dashboard').classList.contains('hidden'))load()},30000);
+</script>
+</body>
+</html>
