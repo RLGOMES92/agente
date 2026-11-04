@@ -139,3 +139,5 @@ export const getCompanyOverview = (companyId, limit = 50) => ({
 
 export const disableUser = (id) => { const result = userQ.disable.run(id); userQ.deleteSessionsForUser.run(id); return result.changes; };
 export const listCompanyUsers = (companyId) => userQ.listCompany.all(companyId);
+
+export const closeDatabase = () => db.close();
