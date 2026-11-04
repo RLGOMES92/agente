@@ -1,0 +1,20 @@
+{
+  "id": "nome-da-empresa",
+  "phone_number_id": "",
+  "token_env": "WA_TOKEN_NOME",
+  "team_number": "",
+  "variables": {
+    "NOME_EMPRESA": "NOME DA EMPRESA",
+    "OBJETIVO_FINAL": "objetivo do atendimento",
+    "TOM_DE_VOZ": "profissional, cordial e objetivo",
+    "EMOJIS": "Use emojis com moderação.",
+    "REGRAS_ESPECIFICAS": "Regras adicionais confirmadas pela empresa.",
+    "DADOS_INSTITUCIONAIS": "Informações institucionais verificadas.",
+    "CATALOGO_PRECOS": "Catálogo e preços confirmados. Se não houver informação, transfira para a equipe.",
+    "RESTRICOES": "Restrições e limitações confirmadas.",
+    "LINK_FECHAMENTO": "Link ou instrução oficial de fechamento.",
+    "PERGUNTA_QUALIFICACAO": "Qual informação é necessária para avançar?",
+    "REGRA_DE_FECHAMENTO": "Encaminhe para a equipe quando necessário.",
+    "DESCRICAO_CURTA_NEGOCIO": "descrição curta do negócio"
+  }
+}
