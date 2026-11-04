@@ -81,7 +81,6 @@ Painel administrativo:
 
 Endpoints:
 - `GET /health`: verificação simples de disponibilidade.
-- `GET /admin/overview`: resumo de operação protegido por `ADMIN_TOKEN` no header `x-admin-token`.
 - `GET /admin/companies`: lista configurações administrativas sem retornar segredos.
 - `POST /admin/companies`: cadastra empresa; recebe `id`, `phone_number_id`, `token_env`, `team_number` e `variables`.
 - `PUT /admin/companies/:id`: atualiza os mesmos campos de uma empresa existente.
@@ -104,7 +103,7 @@ A autenticação de usuários é separada do acesso administrativo por `ADMIN_TO
 
 - `POST /admin/users`: cria um usuário usando o header `x-admin-token`. Campos: `email`, `password` (mínimo 12 caracteres), `role` e `company_id`.
 - Papéis disponíveis: `platform_admin`, `company_admin`, `operator` e `viewer`.
-- Usuários de empresa precisam ter um `company_id) existente. `platform_admin` não recebe vínculo de empresa.
+- Usuários de empresa precisam ter um `company_id` existente. `platform_admin` não recebe vínculo de empresa.
 - `GET /admin/users`: lista usuários sem hashes ou salts de senha.
 - `POST /admin/users/:id/disable`: desativa o usuário e revoga suas sessões.
 - `POST /auth/login`: recebe e-mail e senha e retorna token de sessão com validade de 12 horas.
