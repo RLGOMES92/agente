@@ -192,7 +192,12 @@ async function handle(company, msg) {
 }
 
 function isAdmin(req) {
-  return Boolean(process.env.ADMIN_TOKEN) && req.get('x-admin-token') === process.env.ADMIN_TOKEN;
+  const expected = process.env.ADMIN_TOKEN || '';
+  const provided = req.get('x-admin-token') || '';
+  if (!expected || !provided) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 app.get('/admin/companies', (req, res) => {
