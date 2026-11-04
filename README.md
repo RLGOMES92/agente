@@ -42,7 +42,7 @@ A configuração fica em `companies/<empresa>.json`.
 Para a DaPaz:
 - `phone_number_id`: Phone Number ID fornecido pela Meta (necessário para WhatsApp real).
 - `token_env`: nome da variável de ambiente que contém o token da Meta.
-- `team_number`: número da equipe em formato internacional, somente dígitos (ex.: 5511999999999). É necessário para receber os avisos de transbordo.
+- `team_number`: número da equipe em formato internacional, somente dígitos. Também é possível definir `TEAM_NUMBER_DAPAZ` no ambiente; essa variável tem prioridade e evita gravar o telefone no GitHub. É necessário para receber os avisos de transbordo.
 - `variables`: informações usadas para preencher o prompt da empresa.
 
 Para cadastrar outra empresa, copie `companies/_modelo.json` para `companies/nome.json`, altere os dados e crie a variável de token correspondente no ambiente. Nunca coloque tokens diretamente nos arquivos JSON.
@@ -52,7 +52,7 @@ Para cadastrar outra empresa, copie `companies/_modelo.json` para `companies/nom
 1. Crie/configure um app Business em Meta for Developers e adicione WhatsApp.
 2. Configure o número que será usado pelo bot e obtenha o Phone Number ID.
 3. Gere um token de usuário do sistema com as permissões necessárias e acesso ao ativo WhatsApp.
-4. Preencha no ambiente: `WA_TOKEN_DAPAZ`, `APP_SECRET`, `VERIFY_TOKEN` e `ADMIN_TOKEN`.
+4. Preencha no ambiente: `WA_TOKEN_DAPAZ`, `TEAM_NUMBER_DAPAZ`, `APP_SECRET`, `VERIFY_TOKEN` e `ADMIN_TOKEN`. Defina `TEAM_NUMBER_DAPAZ` com o número da equipe em formato internacional, somente dígitos (ex.: DDI + DDD + número). Não coloque telefone real, tokens ou segredos no GitHub.
 5. Atualize `phone_number_id` e `team_number` em `companies/dapaz.json`.
 6. Publique o servidor em HTTPS e configure o webhook `https://SEU-DOMINIO/webhook`, usando o mesmo `VERIFY_TOKEN`; assine o campo `messages`.
 
