@@ -14,6 +14,14 @@ let companies = loadCompanies();
 let byPhoneId = {};
 function refreshCompanies() {
   companies = loadCompanies();
+  for (const company of Object.values(companies)) {
+    const envName = `TEAM_NUMBER_${company.id.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+    const configuredNumber = process.env[envName] || company.team_number || '';
+    company.team_number = /^\\d{8,15}$/.test(configuredNumber) ? configuredNumber : '';
+    if (configuredNumber && !company.team_number) {
+      console.warn(`[CONFIG] ${company.id}: ${envName} deve conter de 8 a 15 dígitos; transbordo sem notificação.`);
+    }
+  }
   byPhoneId = Object.fromEntries(Object.values(companies).filter((c) => c.phone_number_id).map((c) => [c.phone_number_id, c]));
   return companies;
 }
