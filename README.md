@@ -25,6 +25,16 @@ npm run chat dapaz
 
 No simulador, teste perguntas sobre produtos, preços, personalização e pedidos para falar com uma pessoa. A configuração inicial da DaPaz contém apenas informações já confirmadas; preços, sabores, prazos e agenda são encaminhados à equipe porque ainda precisam ser cadastrados.
 
+### Demonstração sem custo de IA
+
+Para experimentar o fluxo básico sem chave da Anthropic e sem conectar o WhatsApp:
+
+```bash
+npm run demo
+```
+
+Essa demonstração usa respostas simuladas locais. Ela permite visualizar o acolhimento, a apresentação dos serviços e a pausa após um transbordo, mas **não testa o Claude nem envia mensagens reais**. Para testar respostas geradas por IA, use `npm run chat dapaz` com uma chave válida da Anthropic no arquivo `.env`.
+
 ## 2. Configuração da empresa
 
 A configuração fica em `companies/<empresa>.json`.
