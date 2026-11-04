@@ -96,3 +96,22 @@ Endpoints:
 - Use tokens fortes e exclusivos para `VERIFY_TOKEN` e `ADMIN_TOKEN`.
 - Configure `APP_SECRET` para validar a assinatura dos webhooks.
 - A configuração da DaPaz é inicial e não contém preços nem dados de agenda; revise e complete a base antes de atendimento real.
+
+
+## Usuários e isolamento por empresa
+
+A autenticação de usuários é separada do acesso administrativo por `ADMIN_TOKEN`.
+
+- `POST /admin/users`: cria um usuário usando o header `x-admin-token`. Campos: `email`, `password` (mínimo 12 caracteres), `role` e `company_id`.
+- Papéis disponíveis: `platform_admin`, `company_admin`, `operator` e `viewer`.
+- Usuários de empresa precisam ter um `company_id) existente. `platform_admin` não recebe vínculo de empresa.
+- `GET /admin/users`: lista usuários sem hashes ou salts de senha.
+- `POST /admin/users/:id/disable`: desativa o usuário e revoga suas sessões.
+- `POST /auth/login`: recebe e-mail e senha e retorna token de sessão com validade de 12 horas.
+- `GET /auth/me`: valida a sessão pelo header `Authorization: Bearer <token>`.
+- `POST /auth/logout`: encerra a sessão apresentada.
+- `GET /tenant/overview`: retorna indicadores e conversas somente da empresa vinculada ao usuário autenticado.
+
+As senhas são derivadas com scrypt e salt aleatório; o banco armazena apenas o hash. O token de sessão é armazenado como hash SHA-256. Tentativas de login por IP são limitadas temporariamente. Não compartilhe tokens de sessão e use HTTPS em produção.
+
+**Importante:** o painel web atual continua sendo o console administrativo baseado em `ADMIN_TOKEN`. As rotas de autenticação e visão de empresa estão disponíveis no backend, mas a tela de login individual por empresa ainda será integrada numa próxima etapa.
