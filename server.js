@@ -204,6 +204,7 @@ app.get('/admin/companies', (req, res) => {
 
 app.post('/admin/companies', async (req, res) => {
   if (!isAdmin(req)) return res.sendStatus(401);
+  refreshCompanies();
   const { id, ...config } = req.body || {};
   if (typeof id !== 'string' || companies[id]) return res.status(400).json({ ok: false, error: 'ID inválido ou já cadastrado.' });
   const error = validateCompanyConfig(id, config);
@@ -246,6 +247,7 @@ app.post('/admin/resume', (req, res) => {
   if (!isAdmin(req)) {
     return res.sendStatus(401);
   }
+  refreshCompanies();
   const { company, phone } = req.body || {};
   if (!companies[company] || typeof phone !== 'string' || !/^\d{8,15}$/.test(phone)) {
     return res.sendStatus(400);
