@@ -24,6 +24,13 @@ const q = {
   clear: db.prepare('DELETE FROM messages WHERE company=? AND phone=?'),
   seen: db.prepare('INSERT OR IGNORE INTO seen (id, ts) VALUES (?, ?)'),
   purge: db.prepare('DELETE FROM seen WHERE ts < ?'),
+  stats: db.prepare(`SELECT company, COUNT(*) AS conversations,
+    SUM(CASE WHEN paused=1 THEN 1 ELSE 0 END) AS paused
+    FROM conversations GROUP BY company`),
+  recent: db.prepare(`SELECT c.company, c.phone, c.paused, c.updated,
+    (SELECT m.content FROM messages m WHERE m.company=c.company AND m.phone=c.phone ORDER BY m.id DESC LIMIT 1) AS last_message,
+    (SELECT m.ts FROM messages m WHERE m.company=c.company AND m.phone=c.phone ORDER BY m.id DESC LIMIT 1) AS last_message_at
+    FROM conversations c ORDER BY COALESCE(c.updated,0) DESC LIMIT ?`),
 };
 
 export const isPaused = (c, p) => !!q.isPaused.get(c, p)?.paused;
@@ -34,3 +41,12 @@ export const clearHistory = (c, p) => q.clear.run(c, p);
 // true se a mensagem é nova; false se já foi processada (a Meta reenvia webhooks)
 export const markSeen = (id) => q.seen.run(id, Date.now()).changes === 1;
 export const purgeSeen = () => q.purge.run(Date.now() - 24 * 3600 * 1000);
+
+// Visão administrativa resumida: não retorna histórico completo nem credenciais.
+export const getOverview = (limit = 50) => ({
+  companies: q.stats.all(),
+  recent: q.recent.all(Math.min(100, Math.max(1, Number(limit) || 50))).map((row) => ({
+    ...row,
+    last_message: row.last_message ? String(row.last_message).slice(0, 160) : null,
+  })),
+});
