@@ -299,6 +299,49 @@ app.post('/admin/users', async (req, res) => {
   }
 });
 
+app.get('/tenant/users', (req, res) => {
+  const user = sessionUser(req);
+  if (!user) return res.sendStatus(401);
+  if (user.role !== 'company_admin' || !user.company_id) return res.sendStatus(403);
+  res.set('Cache-Control', 'no-store');
+  return res.json({ ok: true, users: db.listCompanyUsers(user.company_id) });
+});
+
+app.post('/tenant/users', async (req, res) => {
+  const user = sessionUser(req);
+  if (!user) return res.sendStatus(401);
+  if (user.role !== 'company_admin' || !user.company_id) return res.sendStatus(403);
+  const { email, password, role } = req.body || {};
+  if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
+    return res.status(400).json({ ok: false, error: 'E-mail inválido.' });
+  }
+  if (typeof password !== 'string' || password.length < 12 || password.length > 1024) {
+    return res.status(400).json({ ok: false, error: 'A senha deve ter entre 12 e 1024 caracteres.' });
+  }
+  if (!['operator', 'viewer'].includes(role)) return res.status(400).json({ ok: false, error: 'O administrador da empresa pode criar apenas operadores e visualizadores.' });
+  if (db.getUserByEmail(email.trim().toLowerCase())) return res.status(409).json({ ok: false, error: 'Este e-mail já está cadastrado.' });
+  try {
+    const salt = crypto.randomBytes(16).toString('hex');
+    const hash = await scrypt(password, salt, 64);
+    const id = db.createUser({ email: email.trim().toLowerCase(), password_hash: hash.toString('hex'), password_salt: salt, role, company_id: user.company_id });
+    return res.status(201).json({ ok: true, user: db.getUserById(id) });
+  } catch (error) {
+    console.error('[TENANT] Falha ao criar usuário da empresa:', error);
+    return res.status(500).json({ ok: false, error: 'Não foi possível criar o usuário.' });
+  }
+});
+
+app.post('/tenant/users/:id/disable', (req, res) => {
+  const user = sessionUser(req);
+  if (!user) return res.sendStatus(401);
+  if (user.role !== 'company_admin' || !user.company_id) return res.sendStatus(403);
+  const id = Number.parseInt(req.params.id, 10);
+  if (!Number.isSafeInteger(id) || id < 1 || id === user.id) return res.sendStatus(400);
+  const target = db.getUserById(id);
+  if (!target || target.company_id !== user.company_id || !['operator', 'viewer'].includes(target.role)) return res.sendStatus(404);
+  return res.json({ ok: true, disabled: db.disableUser(id) === 1 });
+});
+
 app.get('/tenant/overview', (req, res) => {
   const user = sessionUser(req);
   if (!user) return res.sendStatus(401);
