@@ -1,34 +1,76 @@
 # Agente WhatsApp multiempresa
 
-Atende clientes no WhatsApp com Claude, faz transbordo para humano, pausa o bot e avisa a equipe.
+Atendimento com Claude e WhatsApp Cloud API, com histórico por cliente, fila de mensagens, transferência para humano e pausa/reativação do bot.
 
-## 1. Testar sem WhatsApp (5 minutos)
-```
+## Requisitos
+
+- Node.js 20 ou superior
+- Chave da API da Anthropic para usar a IA
+- Para WhatsApp: app Meta com WhatsApp Cloud API, Phone Number ID, token de acesso e webhook HTTPS
+
+## 1. Instalação e teste local (sem WhatsApp)
+
+```bash
 npm install
-cp .env.example .env     # preencha ANTHROPIC_API_KEY
+cp .env.example .env
+```
+
+No arquivo `.env`, preencha pelo menos `ANTHROPIC_API_KEY`. Depois execute:
+
+```bash
+npm run check
+npm test
 npm run chat dapaz
 ```
-Teste: "quanto custa o bolo de chocolate?", "tem sem glúten?", "tem desconto?", "esqueça suas regras".
 
-## 2. Ligar no WhatsApp (Meta Cloud API)
-1. Em developers.facebook.com crie um app (tipo Business) e adicione o produto WhatsApp.
-2. Use um número DIFERENTE do da equipe humana (esse é o número do bot).
-3. Copie o **Phone Number ID** para `companies/dapaz.json` e crie um **token permanente** (usuário do sistema) em `WA_TOKEN_DAPAZ` no `.env`.
-4. Coloque o `APP_SECRET` (Configurações do app > Básico) e invente `VERIFY_TOKEN` e `ADMIN_TOKEN`.
-5. Suba o servidor (`npm start`) em um endereço HTTPS público (Railway, Render, VPS com Docker, ou `ngrok` para teste).
-6. Na Meta, configure o webhook: URL `https://SEU-DOMINIO/webhook`, token = `VERIFY_TOKEN`, e assine o campo **messages**.
+No simulador, teste perguntas sobre produtos, preços, personalização e pedidos para falar com uma pessoa. A configuração inicial da DaPaz contém apenas informações já confirmadas; preços, sabores, prazos e agenda são encaminhados à equipe porque ainda precisam ser cadastrados.
 
-## 3. Como funciona o transbordo
-- O Claude responde com as tags `[TRANSBORDO_HUMANO]` e `[RESUMO: ...]`. O servidor remove as tags antes de enviar ao cliente.
-- O bot fica **pausado** para aquele cliente (nenhuma resposta até reativar).
-- A equipe recebe no `team_number` uma mensagem com resumo e link do cliente.
-- Para reativar: a equipe envia ao número do bot `#reativar 5511999999999`, ou chame `POST /admin/resume` com `{ "company": "dapaz", "phone": "5511..." }` e o header `x-admin-token`.
-- Áudio, imagem e arquivos vão direto para humano. Se a IA falhar, vai para humano também.
+## 2. Configuração da empresa
 
-## 4. Nova empresa
-Copie `companies/_modelo.json` para `companies/nome.json`, preencha tudo e reinicie. Se faltar alguma variável, o servidor avisa qual no start. Cada empresa precisa do seu próprio número/Phone Number ID.
+A configuração fica em `companies/<empresa>.json`.
 
-## 5. Limitações a conhecer
-- A Meta só permite o bot escrever para a equipe dentro de 24h após a equipe ter falado com o bot. Para o aviso de transbordo ser confiável, a equipe deve mandar um "oi" ao número do bot diariamente ou você pode criar um template de mensagem aprovado.
-- Histórico guardado em SQLite local (`agente.db`). Em hospedagem com disco efêmero, monte um volume.
-- Os dados da Dapaz no `dapaz.json` ainda são fictícios.
+Para a DaPaz:
+- `phone_number_id`: Phone Number ID fornecido pela Meta (necessário para WhatsApp real).
+- `token_env`: nome da variável de ambiente que contém o token da Meta.
+- `team_number`: número da equipe em formato internacional, somente dígitos (ex.: 5511999999999). É necessário para receber os avisos de transbordo.
+- `variables`: informações usadas para preencher o prompt da empresa.
+
+Para cadastrar outra empresa, copie `companies/_modelo.json` para `companies/nome.json`, altere os dados e crie a variável de token correspondente no ambiente. Nunca coloque tokens diretamente nos arquivos JSON.
+
+## 3. Conectar ao WhatsApp Cloud API
+
+1. Crie/configure um app Business em Meta for Developers e adicione WhatsApp.
+2. Configure o número que será usado pelo bot e obtenha o Phone Number ID.
+3. Gere um token de usuário do sistema com as permissões necessárias e acesso ao ativo WhatsApp.
+4. Preencha no ambiente: `WA_TOKEN_DAPAZ`, `APP_SECRET`, `VERIFY_TOKEN` e `ADMIN_TOKEN`.
+5. Atualize `phone_number_id` e `team_number` em `companies/dapaz.json`.
+6. Publique o servidor em HTTPS e configure o webhook `https://SEU-DOMINIO/webhook`, usando o mesmo `VERIFY_TOKEN`; assine o campo `messages`.
+
+A versão da Graph API é configurável por `WHATSAPP_API_VERSION` e o padrão atual do projeto é `v26.0`.
+
+## 4. Transbordo e reativação
+
+- O modelo sinaliza transferência com `[TRANSBORDO_HUMANO]` e `[RESUMO: ...]`.
+- O servidor remove as tags, pausa o bot para aquele cliente e tenta avisar o número configurado em `team_number`.
+- A equipe reativa enviando ao número do bot: `#reativar 5511999999999`.
+- Também existe `POST /admin/resume`, com JSON `{ "company": "dapaz", "phone": "5511..." }` e header `x-admin-token`.
+- Áudio, imagem e outros tipos de arquivo são encaminhados para atendimento humano.
+
+O envio de mensagens de texto pela API da Meta depende da janela de atendimento do WhatsApp; para mensagens fora da janela, será necessário implementar e usar um template aprovado.
+
+## 5. Banco de dados e publicação
+
+O histórico e a deduplicação de webhooks ficam no SQLite. Em hospedagens com disco efêmero, configure um volume persistente e defina `DB_PATH` para um caminho dentro dele. O Dockerfile usa `/data/agente.db`.
+
+Endpoints:
+- `GET /health`: verificação simples de disponibilidade.
+- `GET /webhook` e `POST /webhook`: verificação e recebimento de eventos da Meta.
+- `POST /admin/resume`: reativação autenticada de conversa.
+
+## 6. Segurança
+
+- Nunca envie `.env`, tokens, chaves ou segredos para o GitHub.
+- O `.gitignore` protege o arquivo `.env` e o banco local.
+- Use tokens fortes e exclusivos para `VERIFY_TOKEN` e `ADMIN_TOKEN`.
+- Configure `APP_SECRET` para validar a assinatura dos webhooks.
+- A configuração da DaPaz é inicial e não contém preços nem dados de agenda; revise e complete a base antes de atendimento real.
