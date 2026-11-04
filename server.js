@@ -223,6 +223,18 @@ function loginBlocked(ip) {
   }
   return entry.count >= 8;
 }
+function audit(action, user = null, targetType = null, targetId = null, metadata = {}) {
+  try {
+    db.addAuditLog({
+      company_id: user?.company_id || null,
+      actor_user_id: user?.id || null,
+      action, target_type: targetType, target_id: targetId,
+      metadata,
+    });
+  } catch (error) {
+    console.error('[AUDITORIA] Falha ao registrar evento:', error.message);
+  }
+}
 function recordLoginFailure(ip) {
   const now = Date.now();
   const entry = loginAttempts.get(ip);
@@ -249,6 +261,7 @@ app.post('/auth/login', async (req, res) => {
   const expiresAt = Date.now() + SESSION_TTL_MS;
   db.createUserSession(crypto.createHash('sha256').update(token).digest('hex'), user.id, expiresAt);
   db.updateUserLogin(user.id);
+  audit('auth.login', user, 'user', String(user.id));
   return res.json({ ok: true, token, expires_at: expiresAt, user: { id: user.id, email: user.email, role: user.role, company_id: user.company_id } });
 });
 
@@ -260,8 +273,49 @@ app.get('/auth/me', (req, res) => {
 
 app.post('/auth/logout', (req, res) => {
   const token = bearerToken(req);
+  const user = sessionUser(req);
   if (token) db.deleteUserSession(crypto.createHash('sha256').update(token).digest('hex'));
+  if (user) audit('auth.logout', user, 'user', String(user.id));
   return res.json({ ok: true });
+});
+
+app.post('/auth/change-password', async (req, res) => {
+  const user = sessionUser(req);
+  if (!user) return res.sendStatus(401);
+  const currentPassword = typeof req.body?.current_password === 'string' ? req.body.current_password : '';
+  const newPassword = typeof req.body?.new_password === 'string' ? req.body.new_password : '';
+  if (newPassword.length < 12 || newPassword.length > 1024) {
+    return res.status(400).json({ ok: false, error: 'A nova senha deve ter entre 12 e 1024 caracteres.' });
+  }
+  const stored = db.getUserByEmail(user.email);
+  const candidate = await scrypt(currentPassword, stored.password_salt, 64);
+  const expected = Buffer.from(stored.password_hash, 'hex');
+  if (expected.length !== candidate.length || !crypto.timingSafeEqual(expected, candidate)) {
+    return res.status(401).json({ ok: false, error: 'Senha atual incorreta.' });
+  }
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = await scrypt(newPassword, salt, 64);
+  db.changeUserPassword(user.id, hash.toString('hex'), salt);
+  const token = bearerToken(req);
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  db.revokeOtherUserSessions(user.id, tokenHash);
+  audit('auth.password_changed', user, 'user', String(user.id));
+  return res.json({ ok: true, message: 'Senha alterada. Outras sessões foram encerradas.' });
+});
+
+app.get('/tenant/audit', (req, res) => {
+  const user = sessionUser(req);
+  if (!user) return res.sendStatus(401);
+  if (!user.company_id || !['company_admin', 'operator', 'viewer'].includes(user.role)) return res.sendStatus(403);
+  if (user.role !== 'company_admin') return res.sendStatus(403);
+  res.set('Cache-Control', 'no-store');
+  return res.json({ ok: true, logs: db.getCompanyAuditLogs(user.company_id, req.query.limit) });
+});
+
+app.get('/admin/audit', (req, res) => {
+  if (!isAdmin(req)) return res.sendStatus(401);
+  res.set('Cache-Control', 'no-store');
+  return res.json({ ok: true, logs: db.getAuditLogs(req.query.limit) });
 });
 
 app.get('/admin/users', (req, res) => {
@@ -289,6 +343,8 @@ app.post('/admin/users', async (req, res) => {
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = await scrypt(password, salt, 64);
     const id = db.createUser({ email: email.trim().toLowerCase(), password_hash: hash.toString('hex'), password_salt: salt, role, company_id: companyId });
+    audit('admin.user_created', null, 'user', String(id), { role, company_id: companyId });
+    audit('tenant.user_created', user, 'user', String(id), { role });
     return res.status(201).json({ ok: true, user: db.getUserById(id) });
   } catch (error) {
     console.error('[ADMIN] Falha ao criar usuário:', error);
@@ -336,7 +392,9 @@ app.post('/tenant/users/:id/disable', (req, res) => {
   if (!Number.isSafeInteger(id) || id < 1 || id === user.id) return res.sendStatus(400);
   const target = db.getUserById(id);
   if (!target || target.company_id !== user.company_id || !['operator', 'viewer'].includes(target.role)) return res.sendStatus(404);
-  return res.json({ ok: true, disabled: db.disableUser(id) === 1 });
+  const disabled = db.disableUser(id) === 1;
+  if (disabled) audit('tenant.user_disabled', user, 'user', String(id));
+  return res.json({ ok: true, disabled });
 });
 
 app.get('/tenant/overview', (req, res) => {
@@ -356,6 +414,7 @@ app.post('/admin/users/:id/disable', (req, res) => {
   if (!user) return res.sendStatus(404);
   if (!user.active) return res.json({ ok: true, already_disabled: true });
   const disabled = db.disableUser(id);
+  if (disabled === 1) audit('admin.user_disabled', null, 'user', String(id));
   return res.json({ ok: true, disabled: disabled === 1 });
 });
 
@@ -376,6 +435,7 @@ app.post('/admin/companies', async (req, res) => {
   try {
     await writeCompanyConfig(id, config);
     refreshCompanies();
+    audit('admin.company_created', null, 'company', id);
     return res.status(201).json({ ok: true, company: safeCompanyConfig(companies[id]) });
   } catch (cause) {
     console.error('[ADMIN] Falha ao cadastrar empresa:', cause);
@@ -393,6 +453,7 @@ app.put('/admin/companies/:id', async (req, res) => {
   try {
     await writeCompanyConfig(id, req.body);
     refreshCompanies();
+    audit('admin.company_updated', null, 'company', id);
     return res.json({ ok: true, company: safeCompanyConfig(companies[id]) });
   } catch (cause) {
     console.error('[ADMIN] Falha ao atualizar empresa:', cause);
@@ -418,6 +479,7 @@ app.post('/admin/resume', (req, res) => {
   }
   db.setPaused(company, phone, false);
   db.clearHistory(company, phone);
+  audit('admin.conversation_resumed', null, 'conversation', `${company}:${phone}`);
   return res.json({ ok: true });
 });
 
@@ -436,4 +498,9 @@ app.use((error, _req, res, _next) => {
 
 setInterval(db.purgeSeen, 3600 * 1000).unref();
 setInterval(db.purgeUserSessions, 3600 * 1000).unref();
+setInterval(() => {
+  const cutoff = Date.now() - 15 * 60 * 1000;
+  for (const [ip, entry] of loginAttempts) if (entry.startedAt < cutoff) loginAttempts.delete(ip);
+  while (loginAttempts.size > 10000) loginAttempts.delete(loginAttempts.keys().next().value);
+}, 5 * 60 * 1000).unref();
 app.listen(process.env.PORT || 3000, () => console.log('Agente no ar'));
