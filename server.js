@@ -68,7 +68,7 @@ async function writeCompanyConfig(id, input) {
     team_number: input.team_number || '',
     variables: input.variables,
   };
-  await fs.writeFile(temporary, JSON.stringify(config, null, 2) + '\\n', { mode: 0o600 });
+  await fs.writeFile(temporary, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
   await fs.rename(temporary, destination);
 }
 
