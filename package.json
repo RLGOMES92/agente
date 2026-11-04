@@ -1,10 +1,12 @@
 {
   "name": "agente-whatsapp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "chat": "node chat.js"
+    "chat": "node chat.js",
+    "test": "node --test",
+    "check": "node --check server.js && node --check agent.js && node --check chat.js && node --check whatsapp.js && node --check db.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.40.0",
@@ -12,5 +14,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2"
   },
-  "engines": { "node": ">=20" }
+  "engines": {
+    "node": ">=20"
+  }
 }
