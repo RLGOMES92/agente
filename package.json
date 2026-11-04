@@ -6,7 +6,7 @@
     "start": "node server.js",
     "chat": "node chat.js",
     "test": "node --test",
-    "check": "node --check server.js && node --check agent.js && node --check chat.js && node --check whatsapp.js && node --check db.js && node --check agent.test.js && node --check demo.js",
+    "check": "node --check server.js && node --check agent.js && node --check chat.js && node --check whatsapp.js && node --check db.js && node --check agent.test.js && node --check security.js && node --check security.test.js && node --check db.test.js && node --check demo.js",
     "demo": "node demo.js"
   },
   "dependencies": {
