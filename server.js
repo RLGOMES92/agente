@@ -105,6 +105,7 @@ async function handle(company, msg) {
     return;
   }
 
+  db.touchConversation(company.id, phone);
   if (db.isPaused(company.id, phone)) return;
 
   if (msg.type !== 'text' || typeof msg.text?.body !== 'string' || !msg.text.body.trim()) {
