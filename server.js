@@ -15,47 +15,79 @@ for (const company of Object.values(companies)) {
 if (!process.env.APP_SECRET) console.warn('[SEGURANÇA] APP_SECRET ausente: validação da assinatura dos webhooks está desativada.');
 
 const app = express();
-app.use(express.json({ verify: (req, _res, buf) => { req.raw = buf; } }));
+app.use(express.json({ limit: '1mb', verify: (req, _res, buf) => { req.raw = buf; } }));
 
 app.get('/webhook', (req, res) => {
-  const { 'hub.mode': mode, 'hub.verify_token': t, 'hub.challenge': ch } = req.query;
-  if (mode === 'subscribe' && t === process.env.VERIFY_TOKEN) return res.status(200).send(ch);
-  res.sendStatus(403);
+  const { 'hub.mode': mode, 'hub.verify_token': token, 'hub.challenge': challenge } = req.query;
+  if (mode === 'subscribe' && token === process.env.VERIFY_TOKEN && process.env.VERIFY_TOKEN) {
+    return res.status(200).send(challenge);
+  }
+  return res.sendStatus(403);
 });
 
 app.post('/webhook', (req, res) => {
   if (process.env.APP_SECRET) {
-    const sig = req.get('x-hub-signature-256') || '';
-    const exp = 'sha256=' + crypto.createHmac('sha256', process.env.APP_SECRET).update(req.raw).digest('hex');
-    const ok = sig.length === exp.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(exp));
-    if (!ok) return res.sendStatus(401);
+    const signature = req.get('x-hub-signature-256') || '';
+    const expected = 'sha256=' + crypto.createHmac('sha256', process.env.APP_SECRET).update(req.raw || Buffer.alloc(0)).digest('hex');
+    const valid = signature.length === expected.length
+      && crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+    if (!valid) return res.sendStatus(401);
   }
+
+  // Confirma o recebimento rapidamente; o processamento acontece na fila.
   res.sendStatus(200);
 
-  for (const entry of req.body.entry || [])
+  for (const entry of req.body?.entry || []) {
     for (const change of entry.changes || []) {
-      const v = change.value || {};
-      const company = byPhoneId[v.metadata?.phone_number_id];
+      const value = change.value || {};
+      const company = byPhoneId[value.metadata?.phone_number_id];
       if (!company) continue;
-      for (const msg of v.messages || [])
-        enqueue(`${company.id}:${msg.from}`, () => handle(company, msg).catch((e) => console.error(e)));
+      for (const message of value.messages || []) {
+        if (!message?.id || !message?.from || !message?.type) {
+          console.warn('[WEBHOOK] Mensagem ignorada: payload sem id, remetente ou tipo.');
+          continue;
+        }
+        enqueue(`${company.id}:${message.from}`, () => handle(company, message));
+      }
     }
+  }
 });
 
 const queues = new Map();
 function enqueue(key, job) {
-  const next = (queues.get(key) || Promise.resolve()).then(job);
+  const previous = queues.get(key) || Promise.resolve();
+  const next = previous
+    .catch((error) => console.error('[FILA] Erro anterior:', error))
+    .then(job)
+    .catch((error) => console.error('[FILA] Falha ao processar conversa:', error));
+
   queues.set(key, next);
-  next.finally(() => { if (queues.get(key) === next) queues.delete(key); });
+  void next.then(() => {
+    if (queues.get(key) === next) queues.delete(key);
+  });
 }
 
 async function handoff(company, phone, summary) {
   db.setPaused(company.id, phone, true);
-  if (company.team_number) {
-    await sendText(
-      company, company.team_number,
-      `🔔 *Transbordo* (${company.variables.NOME_EMPRESA})\nCliente: +${phone}\nMotivo: ${summary || 'não informado'}\nLink: https://wa.me/${phone}\n\nPara reativar o bot: #reativar ${phone}`
-    ).catch((e) => console.error('Falha ao avisar equipe', e));
+  if (!company.team_number) {
+    console.warn(`[TRANSBORDO] ${company.id}: equipe sem team_number; conversa ${phone} foi pausada, mas não houve notificação.`);
+    return;
+  }
+
+  const businessName = company.variables?.NOME_EMPRESA || company.id;
+  const message = `🔔 *Transbordo* (${businessName})\nCliente: +${phone}\nMotivo: ${summary || 'não informado'}\nLink: https://wa.me/${phone}\n\nPara reativar o bot: #reativar ${phone}`;
+  try {
+    await sendText(company, company.team_number, message);
+  } catch (error) {
+    console.error('[TRANSBORDO] Conversa pausada, mas falhou o aviso à equipe:', error);
+  }
+}
+
+async function notifyCustomer(company, phone, message) {
+  try {
+    await sendText(company, phone, message);
+  } catch (error) {
+    console.error(`[WHATSAPP] Falha ao responder ao cliente +${phone} (${company.id}):`, error);
   }
 }
 
@@ -64,47 +96,67 @@ async function handle(company, msg) {
   const phone = msg.from;
 
   if (phone === company.team_number) {
-    const m = msg.text?.body?.match(/^#reativar\s+(\d+)/i);
-    if (m) {
-      db.setPaused(company.id, m[1], false);
-      db.clearHistory(company.id, m[1]);
-      await sendText(company, phone, `✅ Bot reativado para +${m[1]}.`);
+    const command = msg.text?.body?.trim().match(/^#reativar\s+(\d{8,15})$/i);
+    if (command) {
+      db.setPaused(company.id, command[1], false);
+      db.clearHistory(company.id, command[1]);
+      await notifyCustomer(company, phone, `✅ Bot reativado para +${command[1]}.`);
     }
     return;
   }
 
   if (db.isPaused(company.id, phone)) return;
 
-  if (msg.type !== 'text') {
-    await sendText(company, phone, 'Recebi seu arquivo! 😊 Um atendente da equipe vai analisar em instantes.');
-    return handoff(company, phone, `Cliente enviou ${msg.type}`);
+  if (msg.type !== 'text' || typeof msg.text?.body !== 'string' || !msg.text.body.trim()) {
+    await handoff(company, phone, `Cliente enviou conteúdo do tipo ${msg.type || 'desconhecido'}`);
+    await notifyCustomer(company, phone, 'Recebi sua mensagem! 😊 Vou encaminhar para nossa equipe continuar o atendimento.');
+    return;
   }
 
-  db.addMessage(company.id, phone, 'user', msg.text.body);
+  db.addMessage(company.id, phone, 'user', msg.text.body.trim());
   let raw;
   try {
     raw = await askClaude(company.system, db.getHistory(company.id, phone));
-  } catch (e) {
-    console.error('Erro Claude', e);
-    await sendText(company, phone, FALLBACK_HANDOFF);
-    return handoff(company, phone, 'Erro técnico na IA');
+  } catch (error) {
+    console.error('[CLAUDE] Erro ao gerar resposta:', error);
+    await handoff(company, phone, 'Erro técnico na IA');
+    await notifyCustomer(company, phone, FALLBACK_HANDOFF);
+    return;
   }
 
-  const { text, handoff: h, summary } = parseReply(raw);
+  const { text, handoff: shouldHandoff, summary } = parseReply(raw);
   db.addMessage(company.id, phone, 'assistant', raw);
-  await sendText(company, phone, text);
-  if (h) await handoff(company, phone, summary);
+
+  // Pausa e notifica a equipe antes de tentar enviar a resposta de transbordo.
+  if (shouldHandoff) await handoff(company, phone, summary);
+  await notifyCustomer(company, phone, text);
 }
 
 app.post('/admin/resume', (req, res) => {
-  if (!process.env.ADMIN_TOKEN || req.get('x-admin-token') !== process.env.ADMIN_TOKEN) return res.sendStatus(401);
+  if (!process.env.ADMIN_TOKEN || req.get('x-admin-token') !== process.env.ADMIN_TOKEN) {
+    return res.sendStatus(401);
+  }
   const { company, phone } = req.body || {};
-  if (!companies[company] || !phone) return res.sendStatus(400);
+  if (!companies[company] || typeof phone !== 'string' || !/^\d{8,15}$/.test(phone)) {
+    return res.sendStatus(400);
+  }
   db.setPaused(company, phone, false);
   db.clearHistory(company, phone);
-  res.json({ ok: true });
+  return res.json({ ok: true });
 });
 
-app.get('/health', (_req, res) => res.json({ ok: true, service: 'agente-whatsapp' }));
-setInterval(db.purgeSeen, 3600 * 1000);
+app.get('/health', (_req, res) => res.json({
+  ok: true,
+  service: 'agente-whatsapp',
+  companies: Object.keys(companies).length,
+  whatsappConfigured: Object.keys(byPhoneId).length > 0,
+}));
+
+app.use((error, _req, res, _next) => {
+  console.error('[HTTP] Erro na requisição:', error);
+  if (res.headersSent) return;
+  return res.status(error.status || 400).json({ ok: false, error: 'Requisição inválida.' });
+});
+
+setInterval(db.purgeSeen, 3600 * 1000).unref();
 app.listen(process.env.PORT || 3000, () => console.log('Agente no ar'));
