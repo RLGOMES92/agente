@@ -17,7 +17,7 @@ function refreshCompanies() {
   for (const company of Object.values(companies)) {
     const envName = `TEAM_NUMBER_${company.id.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
     const configuredNumber = process.env[envName] || company.team_number || '';
-    company.team_number = /^\\d{8,15}$/.test(configuredNumber) ? configuredNumber : '';
+    company.team_number = /^\d{8,15}$/.test(configuredNumber) ? configuredNumber : '';
     if (configuredNumber && !company.team_number) {
       console.warn(`[CONFIG] ${company.id}: ${envName} deve conter de 8 a 15 dígitos; transbordo sem notificação.`);
     }
@@ -271,7 +271,7 @@ app.post('/auth/login', async (req, res) => {
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   if (!email || email.length > 254 || password.length > 1024) return res.status(400).json({ ok: false, error: 'Credenciais inválidas.' });
   const user = db.getUserByEmail(email);
-  const salt = user?.password_salt || 'veyrion-login-dummy-salt';
+  const salt = user?.password_salt || 'agente-login-dummy-salt';
   const candidate = await scrypt(password, salt, 64);
   const expected = user ? Buffer.from(user.password_hash, 'hex') : Buffer.alloc(64);
   if (!user || !user.active || expected.length !== candidate.length || !crypto.timingSafeEqual(expected, candidate)) {
