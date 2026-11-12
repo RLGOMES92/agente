@@ -88,8 +88,8 @@
 </main>
 <script>
 const $=id=>document.getElementById(id);
-let token=sessionStorage.getItem('veyrion_admin_token')||'';
-let tenantToken=sessionStorage.getItem('veyrion_tenant_token')||'';
+let token=sessionStorage.getItem('agente_admin_token')||'';
+let tenantToken=sessionStorage.getItem('agente_tenant_token')||'';
 let tenantUser=null;
 let rows=[];
 let companyConfigs=[];
@@ -102,7 +102,7 @@ async function load(){
  $('dashboardStatus').textContent='';
  try{
   const res=await request('/admin/overview?limit=100');
-  if(res.status===401){sessionStorage.removeItem('veyrion_admin_token');token='';showDashboard(false);$('loginStatus').textContent='Token inválido ou não configurado no servidor.';return}
+  if(res.status===401){sessionStorage.removeItem('agente_admin_token');token='';showDashboard(false);$('loginStatus').textContent='Token inválido ou não configurado no servidor.';return}
   if(!res.ok)throw new Error('Não foi possível consultar o painel (HTTP '+res.status+').');
   const data=await res.json();rows=data.recent||[];
   const companyRes=await request('/admin/companies');
@@ -174,7 +174,7 @@ async function loadTenant(){
  $('tenantStatus').textContent='';
  try{
   const res=await tenantRequest('/tenant/overview');
-  if(res.status===401){sessionStorage.removeItem('veyrion_tenant_token');tenantToken='';showTenant(false);$('tenantLoginStatus').textContent='Sessão expirada. Entre novamente.';return}
+  if(res.status===401){sessionStorage.removeItem('agente_tenant_token');tenantToken='';showTenant(false);$('tenantLoginStatus').textContent='Sessão expirada. Entre novamente.';return}
   if(!res.ok)throw new Error('Não foi possível carregar os dados da empresa.');
   const data=await res.json();const stats=(data.companies||[])[0]||{conversations:0,paused:0};
   $('tenantMetricConversations').textContent=String(stats.conversations||0);$('tenantMetricPaused').textContent=String(stats.paused||0);
@@ -209,7 +209,7 @@ async function disableTenantUser(id,button){
 $('tenantLoginForm').addEventListener('submit',async event=>{
  event.preventDefault();$('tenantLoginStatus').textContent='Autenticando…';
  try{const res=await fetch('/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:$('tenantEmail').value.trim(),password:$('tenantPassword').value})});const data=await res.json();if(!res.ok)throw new Error(data.error||'Falha no login.');if(data.user?.role==='platform_admin'){await fetch('/auth/logout',{method:'POST',headers:{'Authorization':'Bearer '+data.token}});throw new Error('Use o acesso administrativo com ADMIN_TOKEN para entrar como administrador da plataforma.')}
- tenantToken=data.token;tenantUser=data.user;sessionStorage.setItem('veyrion_tenant_token',tenantToken);$('tenantPassword').value='';$('tenantLoginStatus').textContent='';showTenant(true);await loadTenant();
+ tenantToken=data.token;tenantUser=data.user;sessionStorage.setItem('agente_tenant_token',tenantToken);$('tenantPassword').value='';$('tenantLoginStatus').textContent='';showTenant(true);await loadTenant();
  }catch(error){$('tenantLoginStatus').textContent=error.message}
 });
 $('tenantUserForm').addEventListener('submit',async event=>{
@@ -251,10 +251,10 @@ async function resume(company,phone,button){
  try{const res=await request('/admin/resume',{method:'POST',body:JSON.stringify({company,phone})});if(!res.ok)throw new Error(res.status===401?'Acesso não autorizado.':'Não foi possível reativar (HTTP '+res.status+').');await load()}
  catch(e){$('dashboardStatus').textContent=e.message;button.disabled=false}
 }
-$('loginForm').addEventListener('submit',async e=>{e.preventDefault();token=$('token').value.trim();if(!token)return;const res=await request('/admin/overview?limit=1');if(!res.ok){$('loginStatus').textContent=res.status===401?'Token inválido.':'Falha ao conectar ao servidor.';token='';return}sessionStorage.setItem('veyrion_admin_token',token);$('token').value='';$('loginStatus').textContent='';showDashboard(true);await load()});
-$('logout').addEventListener('click',async()=>{if(tenantToken){await tenantRequest('/auth/logout',{method:'POST'}).catch(()=>{});sessionStorage.removeItem('veyrion_tenant_token');tenantToken='';tenantUser=null}sessionStorage.removeItem('veyrion_admin_token');token='';rows=[];showDashboard(false);showTenant(false)});
+$('loginForm').addEventListener('submit',async e=>{e.preventDefault();token=$('token').value.trim();if(!token)return;const res=await request('/admin/overview?limit=1');if(!res.ok){$('loginStatus').textContent=res.status===401?'Token inválido.':'Falha ao conectar ao servidor.';token='';return}sessionStorage.setItem('agente_admin_token',token);$('token').value='';$('loginStatus').textContent='';showDashboard(true);await load()});
+$('logout').addEventListener('click',async()=>{if(tenantToken){await tenantRequest('/auth/logout',{method:'POST'}).catch(()=>{});sessionStorage.removeItem('agente_tenant_token');tenantToken='';tenantUser=null}sessionStorage.removeItem('agente_admin_token');token='';rows=[];showDashboard(false);showTenant(false)});
 $('refresh').addEventListener('click',load);$('filter').addEventListener('input',renderRows);
-if(tenantToken){fetch('/auth/me',{headers:{'Authorization':'Bearer '+tenantToken}}).then(r=>r.ok?r.json():Promise.reject()).then(data=>{tenantUser=data.user;showTenant(true);loadTenant()}).catch(()=>{sessionStorage.removeItem('veyrion_tenant_token');tenantToken='';showDashboard(false)})}else if(token){showDashboard(true);load()}else showDashboard(false);
+if(tenantToken){fetch('/auth/me',{headers:{'Authorization':'Bearer '+tenantToken}}).then(r=>r.ok?r.json():Promise.reject()).then(data=>{tenantUser=data.user;showTenant(true);loadTenant()}).catch(()=>{sessionStorage.removeItem('agente_tenant_token');tenantToken='';showDashboard(false)})}else if(token){showDashboard(true);load()}else showDashboard(false);
 setInterval(()=>{if(token&&!$('dashboard').classList.contains('hidden'))load()},30000);
 </script>
 </body>
