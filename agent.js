@@ -15,7 +15,7 @@ function fill(tpl, vars, id) {
 
 export function loadCompanies() {
   const tpl = fs.readFileSync(path.join(root, 'prompt.template.txt'), 'utf8');
-  const dir = path.join(root, 'companies');
+  const dir = process.env.COMPANY_CONFIG_DIR || path.join(root, 'companies');
   const out = {};
   for (const f of fs.readdirSync(dir)) {
     if (!f.endsWith('.json') || f.startsWith('_')) continue;
