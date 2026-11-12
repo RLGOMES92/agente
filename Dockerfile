@@ -5,5 +5,6 @@ COPY package.json .
 RUN npm install --omit=dev
 COPY . .
 ENV DB_PATH=/data/agente.db
+ENV COMPANY_CONFIG_DIR=/data/companies
 VOLUME /data
-CMD ["node", "server.js"]
+CMD ["sh", "-c", "mkdir -p \"$COMPANY_CONFIG_DIR\" && cp -n /app/companies/*.json \"$COMPANY_CONFIG_DIR/\" 2>/dev/null || true; exec node server.js"]
