@@ -70,13 +70,13 @@ O envio de mensagens de texto pela API da Meta depende da janela de atendimento 
 
 ## 5. Banco de dados e publicação
 
-O histórico e a deduplicação de webhooks ficam no SQLite. Em hospedagens com disco efêmero, configure um volume persistente e defina `DB_PATH` para um caminho dentro dele. O Dockerfile usa `/data/agente.db`.
+O histórico, a deduplicação de webhooks e as configurações das empresas precisam sobreviver a reinicializações e novas versões. Em hospedagens com disco efêmero, configure um volume persistente montado em `/data`. O Dockerfile usa `DB_PATH=/data/agente.db` e `COMPANY_CONFIG_DIR=/data/companies`; no primeiro início, copia os JSON iniciais para esse diretório sem sobrescrever configurações já existentes. Faça backup de `/data` regularmente.
 
 Painel administrativo:
 - Abra `https://SEU-DOMINIO/painel/` no navegador.
 - Informe o `ADMIN_TOKEN`; o token fica somente na sessão atual do navegador.
 - O painel consulta `/admin/overview`, atualiza os indicadores automaticamente e permite reativar conversas pausadas. A reativação limpa o histórico da conversa.
-- Administradores também podem cadastrar e editar empresas pela seção **Empresas**. O cadastro valida o identificador, os campos obrigatórios e a unicidade do Phone Number ID. As configurações são salvas em `companies/<id>.json` e recarregadas pelo servidor sem reinício.
+- Administradores também podem cadastrar e editar empresas pela seção **Empresas**. O cadastro valida o identificador, os campos obrigatórios e a unicidade do Phone Number ID. As configurações são salvas em `COMPANY_CONFIG_DIR/<id>.json` e recarregadas pelo servidor sem reinício. Em Docker, esse diretório deve estar dentro do volume persistente `/data/companies`.
 - O painel não armazena tokens da Meta: `token_env` guarda apenas o nome da variável de ambiente. Cadastre o valor secreto no ambiente de hospedagem antes de conectar a empresa.
 
 Endpoints:
@@ -133,3 +133,12 @@ curl -X POST "$BASE_URL/admin/users" \
 ```
 
 Depois, entre em `/painel/` pela opção **Acesso da equipe** usando o e-mail e a senha criados. Para vincular administradores e equipes a uma empresa, informe o `company_id` correspondente ao criar o usuário.
+
+
+## Publicação e início das vendas
+
+- Consulte [`docs/GO-LIVE.md`](docs/GO-LIVE.md) para os requisitos técnicos, credenciais, webhook e testes de aceitação.
+- Consulte [`docs/VENDAS-E-ONBOARDING.md`](docs/VENDAS-E-ONBOARDING.md) para os planos sugeridos, implantação por cliente e preparação comercial.
+- O painel interno fica em `/painel/`. Ele não é uma página pública de contratação, cobrança ou cadastro automático de novos clientes.
+- Não escale horizontalmente com SQLite local; use uma única instância com volume persistente. Para múltiplas instâncias, planeje PostgreSQL e fila compartilhada.
+- Os testes devem ser executados manualmente no ambiente Node.js 20+ com `npm run check` e `npm test`. O repositório não depende de GitHub Actions.
