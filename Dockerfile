@@ -5,5 +5,4 @@ COPY package.json .
 RUN npm install --omit=dev
 COPY . .
 ENV DB_PATH=/data/agente.db
-VOLUME /data
 CMD ["node", "server.js"]
