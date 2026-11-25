@@ -31,7 +31,7 @@ globalThis.fetch = async (input, init = {}) => {
 };
 
 const { default: app } = await import('./server.js');
-const server = app.listen(0);
+const server = app.listen(0, '127.0.0.1');
 await once(server, 'listening');
 const address = server.address();
 const baseUrl = `http://127.0.0.1:${address.port}`;
