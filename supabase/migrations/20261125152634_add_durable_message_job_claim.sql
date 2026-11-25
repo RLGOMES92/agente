@@ -26,7 +26,3 @@ as $function$
   where jobs.id = candidates.id
   returning jobs.*;
 $function$;
-
--- Keep the privileged worker RPC unavailable to public/browser roles.
-revoke execute on function public.claim_message_jobs(integer) from public, anon, authenticated;
-grant execute on function public.claim_message_jobs(integer) to service_role;
