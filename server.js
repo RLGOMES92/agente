@@ -228,7 +228,8 @@ app.post('/auth/login', async (req, res) => {
     if (blocked) return res.status(429).json({ ok: false, error: 'Muitas tentativas. Aguarde 15 minutos.' });
     return res.status(401).json({ ok: false, error: 'E-mail ou senha inválidos.' });
   }
-  await db.clearLoginAttempts(keys);
+  // Keep the IP-wide counter: a successful login for one account must not reset abuse against other accounts behind the same source.
+  await db.clearLoginAttempts([keys[1]]);
   const token = crypto.randomBytes(32).toString('base64url');
   const expiresAt = Date.now() + SESSION_TTL_MS;
   await db.createUserSession(crypto.createHash('sha256').update(token).digest('hex'), user.id, expiresAt);
