@@ -166,8 +166,12 @@ O webhook persiste cada evento antes de retornar HTTP 200 e tenta iniciar o proc
 As migrações do Supabase são versionadas em `supabase/migrations`. Tabelas do aplicativo têm RLS habilitado e não concedem acesso às roles `anon` e `authenticated`; o backend usa somente a chave secreta.
 
 
-### Limitação conhecida — confiabilidade do envio de saída
-A fila atual deduplica e reprocessa eventos **recebidos**. O envio das respostas e dos avisos de transbordo ainda não possui uma outbox durável independente: falhas no envio para a Meta são registradas em log, mas não há garantia de reenvio. Não considerar o atendimento em produção confiável até essa implementação e testes. Não basta forçar retry do job de entrada: isso pode gerar nova resposta da IA ou mensagens duplicadas.
+### Outbox durável de mensagens enviadas
+O backend grava respostas ao cliente e alertas de transbordo em `message_outbox` antes de tentar enviar. A outbox tem chave idempotente, claim atômico, lease recuperável, backoff exponencial (até 8 tentativas) e registro do ID retornado pela Meta. O worker `/worker` processa tanto mensagens inbound como outbound; configure scheduler a cada 1–5 minutos.
+
+**Aplicação:** migração `20261126000100_add_durable_message_outbox.sql` adicionada ao repositório e aplicada ao projeto Supabase dedicado. Não é necessário reaplicar manualmente.
+
+**Limite importante:** envio é *at-least-once*. Se a Meta aceitar a mensagem e a conexão falhar antes de recebermos a confirmação, um retry pode entregar duplicado. A chave idempotente impede duplicar o registro interno, mas a API WhatsApp não oferece deduplicação de entrega garantida por essa chave. A guarda de inbound evita gerar novamente a resposta quando ela já está persistida na outbox. Falha entre geração da IA e persistência continua exigindo testes e eventual refinamento.
 
 ### Validação antes de ativar atendimento
 - [ ] Executar `npm run check` e `npm test` localmente (Node 20+).
