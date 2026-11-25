@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/$/, '');
 const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -355,6 +354,15 @@ export async function claimMessageJobs(limit = 10) {
   try { rows = raw ? JSON.parse(raw) : []; } catch { rows = []; }
   if (!response.ok) throw new Error(`Supabase claim_message_jobs (${response.status}): ${rows?.message || 'request failed'}`);
   return (rows || []).map((row) => ({ ...row, id: Number(row.id), attempts: Number(row.attempts) }));
+}
+
+export async function purgeMessageJobs() {
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  return request('message_jobs', {
+    method: 'DELETE',
+    query: { status: 'in.(completed,failed)', created_at: `lt.${cutoff}` },
+    prefer: 'return=minimal',
+  });
 }
 
 export async function completeMessageJob(id) {
