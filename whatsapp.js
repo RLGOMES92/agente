@@ -7,7 +7,9 @@ export async function sendText(company, to, body) {
   }
   const token = process.env[company.token_env];
   if (!token) throw new Error(`Token ausente: defina ${company.token_env} no .env`);
-  if (!company.phone_number_id) throw new Error(`Phone Number ID ausente para a empresa ${company.id}`);
+  if (typeof company.phone_number_id !== 'string' || !/^\d{8,30}$/.test(company.phone_number_id)) {
+    throw new Error(`Phone Number ID inválido para a empresa ${company.id}`);
+  }
 
   const res = await fetch(`${GRAPH}/${company.phone_number_id}/messages`, {
     method: 'POST',
