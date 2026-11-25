@@ -171,7 +171,7 @@ O backend grava respostas ao cliente e alertas de transbordo em `message_outbox`
 
 **Aplicação:** migração `20261126000100_add_durable_message_outbox.sql` adicionada ao repositório e aplicada ao projeto Supabase dedicado. Não é necessário reaplicar manualmente.
 
-**Limite importante:** envio é *at-least-once*. Se a Meta aceitar a mensagem e a conexão falhar antes de recebermos a confirmação, um retry pode entregar duplicado. A chave idempotente impede duplicar o registro interno, mas a API WhatsApp não oferece deduplicação de entrega garantida por essa chave. A guarda de inbound evita gerar novamente a resposta quando ela já está persistida na outbox. Falha entre geração da IA e persistência continua exigindo testes e eventual refinamento.
+**Limite importante:** envio é *at-least-once*. Se a Meta aceitar a mensagem e a conexão falhar antes de recebermos a confirmação, um retry pode entregar duplicado. A chave idempotente impede duplicar o registro interno, mas a API WhatsApp não oferece deduplicação de entrega garantida por essa chave. A guarda de inbound evita gerar novamente a resposta quando ela já está persistida na outbox. A intenção de transbordo também é persistida em `message_handoffs` antes da pausa; se houver falha parcial entre o alerta da equipe, a pausa e a confirmação ao cliente, o retry retoma o mesmo transbordo e envia uma confirmação de contingência sem chamar a IA novamente. Marcadores antigos são removidos após 30 dias.
 
 ### Validação antes de ativar atendimento
 - [ ] Executar `npm run check` e `npm test` localmente (Node 20+).
