@@ -164,3 +164,17 @@ O webhook persiste cada evento antes de retornar HTTP 200 e tenta iniciar o proc
 
 ### Migrações
 As migrações do Supabase são versionadas em `supabase/migrations`. Tabelas do aplicativo têm RLS habilitado e não concedem acesso às roles `anon` e `authenticated`; o backend usa somente a chave secreta.
+
+
+### Limitação conhecida — confiabilidade do envio de saída
+A fila atual deduplica e reprocessa eventos **recebidos**. O envio das respostas e dos avisos de transbordo ainda não possui uma outbox durável independente: falhas no envio para a Meta são registradas em log, mas não há garantia de reenvio. Não considerar o atendimento em produção confiável até essa implementação e testes. Não basta forçar retry do job de entrada: isso pode gerar nova resposta da IA ou mensagens duplicadas.
+
+### Validação antes de ativar atendimento
+- [ ] Executar `npm run check` e `npm test` localmente (Node 20+).
+- [ ] Testar webhook GET de verificação, assinatura inválida (401) e ausência de `APP_SECRET` (503).
+- [ ] Enviar mensagem de texto e verificar persistência de histórico e resposta.
+- [ ] Testar falha temporária Supabase/Meta e recuperação pelo worker.
+- [ ] Testar transbordo, equipe sem telefone, pausa e comando `#reativar`.
+- [ ] Confirmar isolamento entre tenants e autenticação administrativa.
+- [ ] Configurar scheduler para chamar `/worker` a cada 1–5 minutos, com `Authorization: Bearer CRON_SECRET`; não expor esse segredo em URL/logs.
+- [ ] Fazer deploy de Preview e validar antes de produção.
