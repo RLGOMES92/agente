@@ -37,7 +37,7 @@ Essa demonstração usa respostas simuladas locais. Ela permite visualizar o aco
 
 ## 2. Configuração da empresa
 
-A configuração fica em `companies/<empresa>.json`.
+Na versão da branch `main` (modo local), a configuração fica em `companies/<empresa>.json`. Na branch de migração, as configurações são armazenadas no Supabase.
 
 Para a DaPaz:
 - `phone_number_id`: Phone Number ID fornecido pela Meta (necessário para WhatsApp real).
@@ -45,7 +45,7 @@ Para a DaPaz:
 - `team_number`: número da equipe em formato internacional, somente dígitos. Também é possível definir `TEAM_NUMBER_DAPAZ` no ambiente; essa variável tem prioridade e evita gravar o telefone no GitHub. É necessário para receber os avisos de transbordo.
 - `variables`: informações usadas para preencher o prompt da empresa.
 
-Para cadastrar outra empresa, copie `companies/_modelo.json` para `companies/nome.json`, altere os dados e crie a variável de token correspondente no ambiente. Nunca coloque tokens diretamente nos arquivos JSON.
+Para a versão local/main, copie o modelo JSON. Na branch de migração, use o painel administrativo para cadastrar/editar tenants, que grava no Supabase. Tokens sempre ficam somente nas variáveis de ambiente.
 
 ## 3. Conectar ao WhatsApp Cloud API
 
@@ -53,7 +53,7 @@ Para cadastrar outra empresa, copie `companies/_modelo.json` para `companies/nom
 2. Configure o número que será usado pelo bot e obtenha o Phone Number ID.
 3. Gere um token de usuário do sistema com as permissões necessárias e acesso ao ativo WhatsApp.
 4. Preencha no ambiente: `WA_TOKEN_DAPAZ`, `TEAM_NUMBER_DAPAZ`, `APP_SECRET`, `VERIFY_TOKEN` e `ADMIN_TOKEN`. Defina `TEAM_NUMBER_DAPAZ` com o número da equipe em formato internacional, somente dígitos (ex.: DDI + DDD + número). Não coloque telefone real, tokens ou segredos no GitHub.
-5. Atualize `phone_number_id` e `team_number` em `companies/dapaz.json`.
+5. Na versão local, atualize `phone_number_id` e `team_number` em `companies/dapaz.json`; na migração, edite a configuração do tenant no painel/Supabase.
 6. Publique o servidor em HTTPS e configure o webhook `https://SEU-DOMINIO/webhook`, usando o mesmo `VERIFY_TOKEN`; assine o campo `messages`.
 
 A versão da Graph API é configurável por `WHATSAPP_API_VERSION` e o padrão atual do projeto é `v26.0`.
@@ -70,13 +70,13 @@ O envio de mensagens de texto pela API da Meta depende da janela de atendimento 
 
 ## 5. Banco de dados e publicação
 
-O histórico e a deduplicação de webhooks ficam no SQLite. Em hospedagens com disco efêmero, configure um volume persistente e defina `DB_PATH` para um caminho dentro dele. O Dockerfile usa `/data/agente.db`.
+A branch `main` utiliza SQLite local. A branch `feat/supabase-vercel-migration` usa Supabase para histórico, deduplicação, sessões, auditoria e fila persistente, preparada para execução serverless.
 
 Painel administrativo:
 - Abra `https://SEU-DOMINIO/painel/` no navegador.
 - Informe o `ADMIN_TOKEN`; o token fica somente na sessão atual do navegador.
 - O painel consulta `/admin/overview`, atualiza os indicadores automaticamente e permite reativar conversas pausadas. A reativação limpa o histórico da conversa.
-- Administradores também podem cadastrar e editar empresas pela seção **Empresas**. O cadastro valida o identificador, os campos obrigatórios e a unicidade do Phone Number ID. As configurações são salvas em `companies/<id>.json` e recarregadas pelo servidor sem reinício.
+- Administradores também podem cadastrar e editar empresas pela seção **Empresas**. O cadastro valida o identificador, os campos obrigatórios e a unicidade do Phone Number ID. Na branch `main`, as configurações são JSON local; na branch de migração, são salvas no Supabase e recarregadas.
 - O painel não armazena tokens da Meta: `token_env` guarda apenas o nome da variável de ambiente. Cadastre o valor secreto no ambiente de hospedagem antes de conectar a empresa.
 
 Endpoints:
