@@ -191,3 +191,5 @@ Cada reserva inbound/outbound recebe um `lease_token` UUID novo. Concluir ou dev
 `npm test` inclui testes com `fetch` simulado para verificar que histórico, exclusão, visão geral e usuários são sempre filtrados pelo `company_id`, além das condições de propriedade das reservas da fila. `npm run check` também verifica a sintaxe desse arquivo de teste.
 
 Tentativas de login com e-mail ausente/malformado ou senha acima do limite também consomem o contador agregado por IP; entradas inválidas não podem contornar o rate limit enviando requisições repetidas com formato incorreto.
+
+O backend aceita a chave nova `sb_secret_...` e a chave legada `service_role`. A chave nova é enviada somente no header `apikey` (não é JWT); o header Bearer é mantido apenas para a chave legada JWT.
