@@ -22,3 +22,7 @@ values (
   true
 )
 on conflict (id) do nothing;
+
+create index if not exists idx_users_company on public.users(company_id, active);
+create index if not exists idx_audit_company_time on public.audit_logs(company_id, created_at desc);
+create index if not exists idx_audit_time on public.audit_logs(created_at desc);
