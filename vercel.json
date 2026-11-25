@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "functions": {
+    "api/index.js": {
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index" },
+    { "source": "/webhook", "destination": "/api/index" },
+    { "source": "/worker", "destination": "/api/index" },
+    { "source": "/auth/(.*)", "destination": "/api/index" },
+    { "source": "/admin/(.*)", "destination": "/api/index" },
+    { "source": "/tenant/(.*)", "destination": "/api/index" }
+  ]
+}
