@@ -40,8 +40,8 @@ Essa demonstração usa respostas simuladas locais. Ela permite visualizar o aco
 Na versão da branch `main` (modo local), a configuração fica em `companies/<empresa>.json`. Na branch de migração, as configurações são armazenadas no Supabase.
 
 Para a DaPaz:
-- `phone_number_id`: Phone Number ID fornecido pela Meta (necessário para WhatsApp real).
-- `token_env`: nome da variável de ambiente que contém o token da Meta.
+- `phone_number_id`: Phone Number ID numérico fornecido pela Meta (8 a 30 dígitos; necessário para WhatsApp real).
+- `token_env`: nome da variável de ambiente que contém o token da Meta; deve começar com `WA_TOKEN_`.
 - `team_number`: número da equipe em formato internacional, somente dígitos. Também é possível definir `TEAM_NUMBER_DAPAZ` no ambiente; essa variável tem prioridade e evita gravar o telefone no GitHub. É necessário para receber os avisos de transbordo.
 - `variables`: informações usadas para preencher o prompt da empresa.
 
