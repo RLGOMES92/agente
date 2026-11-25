@@ -139,14 +139,16 @@ async function handle(company, msg) {
     return;
   }
 
-  await db.touchConversation(company.id, phone);
-  if (await db.isPaused(company.id, phone)) {
-    // A previous attempt may have paused this conversation before persisting its customer acknowledgement.
-    if (inboundId && await db.hasHandoffForInbound(inboundId)) {
-      await notifyCustomer(company, phone, FALLBACK_HANDOFF, inboundId);
-    }
+  const priorHandoff = inboundId ? await db.getHandoffForInbound(inboundId) : null;
+  if (priorHandoff) {
+    // Resume the same handoff instead of calling the AI again after a partial failure.
+    await handoff(company, phone, priorHandoff.summary, inboundId);
+    await notifyCustomer(company, phone, FALLBACK_HANDOFF, inboundId);
     return;
   }
+
+  await db.touchConversation(company.id, phone);
+  if (await db.isPaused(company.id, phone)) return;
 
   if (msg.type !== 'text' || typeof msg.text?.body !== 'string' || !msg.text.body.trim()) {
     await handoff(company, phone, `Cliente enviou conteúdo do tipo ${msg.type || 'desconhecido'}`, inboundId);
