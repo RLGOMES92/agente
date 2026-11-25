@@ -133,3 +133,34 @@ curl -X POST "$BASE_URL/admin/users" \
 ```
 
 Depois, entre em `/painel/` pela opção **Acesso da equipe** usando o e-mail e a senha criados. Para vincular administradores e equipes a uma empresa, informe o `company_id` correspondente ao criar o usuário.
+
+
+## Deploy serverless (branch de migração)
+
+A versão desta branch troca a persistência SQLite por Supabase e adapta o Express para Vercel. **Não promover a produção até testar a integração e configurar os segredos.**
+
+### Variáveis privadas obrigatórias na Vercel
+- `SUPABASE_URL`: URL do projeto `agente-whatsapp`.
+- `SUPABASE_SECRET_KEY`: chave secret do Supabase (ou `SUPABASE_SERVICE_ROLE_KEY` legado). Nunca usar no frontend.
+- `ANTHROPIC_API_KEY`: chave de API para a IA.
+- `APP_SECRET`: segredo Meta usado para validar assinatura dos webhooks.
+- `VERIFY_TOKEN`: token escolhido para validação do webhook Meta.
+- `ADMIN_TOKEN`: token forte para console administrativo.
+- `CRON_SECRET`: token forte que protege o endpoint worker `/worker`.
+- `WA_TOKEN_DAPAZ`: token WhatsApp Cloud API da empresa DaPaz.
+- `TEAM_NUMBER_DAPAZ`: telefone da equipe com DDI, somente dígitos.
+- `WHATSAPP_API_VERSION`: opcional; padrão atual do código `v26.0`.
+
+Defina essas variáveis nos ambientes Production, Preview e Development conforme aplicável. Não coloque valores secretos no GitHub, no README, nem no chat.
+
+### Configuração Meta
+Webhook URL: `https://SEU-DOMINIO/webhook`
+Verify token: valor de `VERIFY_TOKEN`
+Eventos: `messages`
+Assinatura de payload: habilitar e fornecer `APP_SECRET`.
+
+### Worker persistente
+O webhook persiste cada evento antes de retornar HTTP 200 e tenta iniciar o processamento em background. Jobs podem ser recuperados pelo endpoint `/worker` autenticado com `Authorization: Bearer CRON_SECRET`. Configure um scheduler externo para chamar esse endpoint periodicamente para recuperar jobs pendentes; não dependa apenas do processamento em background.
+
+### Migrações
+As migrações do Supabase são versionadas em `supabase/migrations`. Tabelas do aplicativo têm RLS habilitado e não concedem acesso às roles `anon` e `authenticated`; o backend usa somente a chave secreta.
