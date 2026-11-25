@@ -118,7 +118,8 @@ async function notifyCustomer(company, phone, message) {
 }
 
 async function handle(company, msg) {
-  if (!(await db.markSeen(msg.id))) return;
+  // A fila message_jobs já garante deduplicação por message_id. Não marcar o evento
+  // como concluído antes do processamento: isso impediria retries após falhas transitórias.
   const phone = msg.from;
 
   if (phone === company.team_number) {
