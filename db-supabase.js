@@ -396,6 +396,27 @@ export async function hasCustomerReplyForInbound(inboundId) {
   return Array.isArray(rows) && rows.length > 0;
 }
 
+export async function markHandoffInbound(companyId, phone, inboundId, summary = '') {
+  return request('message_handoffs', {
+    method: 'POST',
+    query: { on_conflict: 'inbound_message_id' },
+    body: {
+      inbound_message_id: inboundId,
+      company_id: companyId,
+      phone,
+      summary: String(summary || '').slice(0, 1000),
+    },
+    prefer: 'resolution=ignore-duplicates,return=representation',
+  });
+}
+
+export async function hasHandoffForInbound(inboundId) {
+  const rows = await request('message_handoffs', {
+    query: { select: 'inbound_message_id', inbound_message_id: `eq.${inboundId}`, limit: 1 },
+  });
+  return Array.isArray(rows) && rows.length > 0;
+}
+
 export async function enqueueOutbound(companyId, destination, body, idempotencyKey) {
   const rows = await request('message_outbox', {
     method: 'POST',
