@@ -40,6 +40,8 @@ test('getHistory sempre restringe a consulta ao tenant e telefone', async () => 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url.searchParams.get('company_id'), 'eq.tenant-a');
   assert.equal(calls[0].url.searchParams.get('phone'), 'eq.5511999990001');
+  assert.equal(calls[0].init.headers.apikey, 'test-only-server-key');
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer test-only-server-key');
 });
 
 test('clearHistory não remove mensagens de outros tenants ou telefones', async () => {
@@ -142,4 +144,19 @@ test('não permite concluir ou falhar jobs sem lease token', async () => {
   await assert.rejects(() => db.failMessageJob(12, 1, new Error('x')), /Lease token ausente/);
   await assert.rejects(() => db.completeOutbound(4), /Lease token ausente/);
   await assert.rejects(() => db.failOutbound(4, 1, new Error('x')), /Lease token ausente/);
+});
+
+
+test('chave sb_secret é enviada somente no header apikey', async () => {
+  const previous = process.env.SUPABASE_SECRET_KEY;
+  process.env.SUPABASE_SECRET_KEY = 'sb_secret_test_key';
+  try {
+    const secretDb = await import('./db-supabase.js?new-secret-key-test');
+    const calls = mockJsonFetch(async () => []);
+    await secretDb.getHistory('tenant-a', '5511999990001');
+    assert.equal(calls[0].init.headers.apikey, 'sb_secret_test_key');
+    assert.equal(calls[0].init.headers.Authorization, undefined);
+  } finally {
+    process.env.SUPABASE_SECRET_KEY = previous;
+  }
 });
