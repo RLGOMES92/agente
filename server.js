@@ -102,41 +102,32 @@ app.post('/webhook', async (req,res)=>{
  res.sendStatus(200);if(queued){if(process.env.VERCEL)waitUntil(processQueue());else void processQueue();}
 });
 
-async function handoff(company, phone, summary) {
+async function handoff(company, phone, summary, inboundId) {
   await db.setPaused(company.id, phone, true);
   if (!company.team_number) {
-    console.warn(`[TRANSBORDO] ${company.id}: equipe sem team_number; conversa ${phone} foi pausada, mas não houve notificação.`);
+    console.warn(`[TRANSBORDO] ${company.id}: equipe sem team_number; conversa ${phone} pausada, aviso não enfileirado.`);
     return;
   }
-
   const businessName = company.variables?.NOME_EMPRESA || company.id;
   const message = `🔔 *Transbordo* (${businessName})\nCliente: +${phone}\nMotivo: ${summary || 'não informado'}\nLink: https://wa.me/${phone}\n\nPara reativar o bot: #reativar ${phone}`;
-  try {
-    await sendText(company, company.team_number, message);
-  } catch (error) {
-    console.error('[TRANSBORDO] Conversa pausada, mas falhou o aviso à equipe:', error);
-  }
+  await db.enqueueOutbound(company.id, company.team_number, message, `${inboundId}:handoff`);
 }
 
-async function notifyCustomer(company, phone, message) {
-  try {
-    await sendText(company, phone, message);
-  } catch (error) {
-    console.error(`[WHATSAPP] Falha ao responder ao cliente +${phone} (${company.id}):`, error);
-  }
+async function notifyCustomer(company, phone, message, inboundId, suffix = 'customer') {
+  await db.enqueueOutbound(company.id, phone, message, `${inboundId}:${suffix}`);
 }
 
 async function handle(company, msg) {
-  // A fila message_jobs já garante deduplicação por message_id. Não marcar o evento
-  // como concluído antes do processamento: isso impediria retries após falhas transitórias.
+  // Persist inbound dedupe separately from outbound delivery; replies are stored before sending.
   const phone = msg.from;
+  const inboundId = msg.id;
 
   if (phone === company.team_number) {
-    const command = msg.text?.body?.trim().match(/^#reativar\s+(\d{8,15})$/i);
+    const command = msg.text?.body?.trim().match(/^#reativar\\s+(\\d{8,15})$/i);
     if (command) {
       await db.setPaused(company.id, command[1], false);
       await db.clearHistory(company.id, command[1]);
-      await notifyCustomer(company, phone, `✅ Bot reativado para +${command[1]}.`);
+      await notifyCustomer(company, phone, `✅ Bot reativado para +${command[1]}.`, inboundId);
     }
     return;
   }
@@ -145,8 +136,8 @@ async function handle(company, msg) {
   if (await db.isPaused(company.id, phone)) return;
 
   if (msg.type !== 'text' || typeof msg.text?.body !== 'string' || !msg.text.body.trim()) {
-    await handoff(company, phone, `Cliente enviou conteúdo do tipo ${msg.type || 'desconhecido'}`);
-    await notifyCustomer(company, phone, 'Recebi sua mensagem! 😊 Vou encaminhar para nossa equipe continuar o atendimento.');
+    await handoff(company, phone, `Cliente enviou conteúdo do tipo ${msg.type || 'desconhecido'}`, inboundId);
+    await notifyCustomer(company, phone, 'Recebi sua mensagem! 😊 Vou encaminhar para nossa equipe continuar o atendimento.', inboundId);
     return;
   }
 
@@ -156,20 +147,34 @@ async function handle(company, msg) {
     raw = await askClaude(company.system, await db.getHistory(company.id, phone));
   } catch (error) {
     console.error('[CLAUDE] Erro ao gerar resposta:', error);
-    await handoff(company, phone, 'Erro técnico na IA');
-    await notifyCustomer(company, phone, FALLBACK_HANDOFF);
+    await handoff(company, phone, 'Erro técnico na IA', inboundId);
+    await notifyCustomer(company, phone, FALLBACK_HANDOFF, inboundId);
     return;
   }
 
   const { text, handoff: shouldHandoff, summary } = parseReply(raw);
   await db.addMessage(company.id, phone, 'assistant', raw);
-
-  // Pausa e notifica a equipe antes de tentar enviar a resposta de transbordo.
-  if (shouldHandoff) await handoff(company, phone, summary);
-  await notifyCustomer(company, phone, text);
+  if (shouldHandoff) await handoff(company, phone, summary, inboundId);
+  await notifyCustomer(company, phone, text, inboundId);
 }
 
-async function processQueue(){await ensureInitialized();await db.purgeSeen();await db.purgeUserSessions();await db.purgeMessageJobs();const jobs=await db.claimMessageJobs(10);for(const j of jobs){try{const co=companies[j.company_id];if(!co)throw Error('Empresa não encontrada');await handle(co,j.payload);await db.completeMessageJob(j.id);}catch(e){console.error('[JOB]',e);await db.failMessageJob(j.id,j.attempts,e);}}return jobs.length;}
+async function processOutboundQueue() {
+  const jobs = await db.claimOutbound(10);
+  for (const job of jobs) {
+    try {
+      const company = companies[job.company_id];
+      if (!company) throw new Error('Empresa não encontrada para mensagem de saída');
+      const result = await sendText(company, job.destination, job.body);
+      await db.completeOutbound(job.id, result?.messages?.[0]?.id || null);
+    } catch (error) {
+      console.error('[OUTBOX] Falha no envio; mensagem será reprocessada:', error);
+      await db.failOutbound(job.id, job.attempts, error);
+    }
+  }
+  return jobs.length;
+}
+
+async function processQueue(){await ensureInitialized();await db.purgeSeen();await db.purgeUserSessions();await db.purgeMessageJobs();await db.purgeOutbound();const jobs=await db.claimMessageJobs(10);for(const j of jobs){try{const co=companies[j.company_id];if(!co)throw Error('Empresa não encontrada');await handle(co,j.payload);await db.completeMessageJob(j.id);}catch(e){console.error('[JOB]',e);await db.failMessageJob(j.id,j.attempts,e);}}const outbound=await processOutboundQueue();return jobs.length+outbound;}
 app.get('/worker',async(req,res)=>{const secret=process.env.CRON_SECRET||'',p=bearerToken(req),a=Buffer.from(p),b=Buffer.from(secret);if(!secret||a.length!==b.length||!crypto.timingSafeEqual(a,b))return res.sendStatus(401);try{return res.json({ok:true,processed:await processQueue()});}catch(e){console.error(e);return res.sendStatus(500);}});
 function isAdmin(req) {
   const expected = process.env.ADMIN_TOKEN || '';
