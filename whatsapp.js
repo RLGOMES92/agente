@@ -2,6 +2,9 @@ const GRAPH_VERSION = process.env.WHATSAPP_API_VERSION || 'v26.0';
 const GRAPH = `https://graph.facebook.com/${GRAPH_VERSION}`;
 
 export async function sendText(company, to, body) {
+  if (typeof company.token_env !== 'string' || !/^WA_TOKEN_[A-Z0-9_]{1,56}$/.test(company.token_env)) {
+    throw new Error(`Nome de variável de token inválido para a empresa ${company.id}`);
+  }
   const token = process.env[company.token_env];
   if (!token) throw new Error(`Token ausente: defina ${company.token_env} no .env`);
   if (!company.phone_number_id) throw new Error(`Phone Number ID ausente para a empresa ${company.id}`);
