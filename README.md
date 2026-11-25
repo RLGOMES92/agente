@@ -64,7 +64,7 @@ A versão da Graph API é configurável por `WHATSAPP_API_VERSION` e o padrão a
 - O servidor remove as tags, pausa o bot para aquele cliente e tenta avisar o número configurado em `team_number`.
 - A equipe reativa enviando ao número do bot: `#reativar 5511999999999`.
 - Também existe `POST /admin/resume`, com JSON `{ "company": "dapaz", "phone": "5511..." }` e header `x-admin-token`.
-- Áudio, imagem e outros tipos de arquivo são encaminhados para atendimento humano.
+- Áudio, imagem e outros tipos de arquivo são encaminhados para atendimento humano; o histórico registra o tipo de conteúdo recebido para dar contexto à equipe.
 
 O envio de mensagens de texto pela API da Meta depende da janela de atendimento do WhatsApp; para mensagens fora da janela, será necessário implementar e usar um template aprovado.
 
