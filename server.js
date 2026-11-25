@@ -198,8 +198,12 @@ async function handle(company, msg) {
 }
 
 async function processOutboundQueue() {
-  const jobs = await db.claimOutbound(10);
-  for (const job of jobs) {
+  let processed = 0;
+  // Claim only when ready to send: a batch reservation can expire while later rows wait behind slow sends.
+  for (let index = 0; index < 10; index += 1) {
+    const [job] = await db.claimOutbound(1);
+    if (!job) break;
+    processed += 1;
     try {
       const company = companies[job.company_id];
       if (!company) throw new Error('Empresa não encontrada para mensagem de saída');
@@ -210,10 +214,38 @@ async function processOutboundQueue() {
       await db.failOutbound(job.id, job.attempts, error);
     }
   }
-  return jobs.length;
+  return processed;
 }
 
-async function processQueue(){await ensureInitialized();await db.purgeSeen();await db.purgeUserSessions();await db.purgeMessageJobs();await db.purgeOutbound();await db.purgeHandoffs();await db.purgeInboundResponses();const jobs=await db.claimMessageJobs(10);for(const j of jobs){try{const co=companies[j.company_id];if(!co)throw Error('Empresa não encontrada');await handle(co,j.payload);await db.completeMessageJob(j.id);}catch(e){console.error('[JOB]',e);await db.failMessageJob(j.id,j.attempts,e);}}const outbound=await processOutboundQueue();return jobs.length+outbound;}
+async function processQueue() {
+  await ensureInitialized();
+  await db.purgeSeen();
+  await db.purgeUserSessions();
+  await db.purgeMessageJobs();
+  await db.purgeOutbound();
+  await db.purgeHandoffs();
+  await db.purgeInboundResponses();
+
+  let processedInbound = 0;
+  // Acquire one lease immediately before handling it, never reserve a batch that waits behind other AI calls.
+  for (let index = 0; index < 10; index += 1) {
+    const [job] = await db.claimMessageJobs(1);
+    if (!job) break;
+    processedInbound += 1;
+    try {
+      const company = companies[job.company_id];
+      if (!company) throw new Error('Empresa não encontrada');
+      await handle(company, job.payload);
+      await db.completeMessageJob(job.id);
+    } catch (error) {
+      console.error('[JOB]', error);
+      await db.failMessageJob(job.id, job.attempts, error);
+    }
+  }
+
+  const processedOutbound = await processOutboundQueue();
+  return processedInbound + processedOutbound;
+}
 app.get('/worker',async(req,res)=>{const secret=process.env.CRON_SECRET||'',p=bearerToken(req),a=Buffer.from(p),b=Buffer.from(secret);if(!secret||a.length!==b.length||!crypto.timingSafeEqual(a,b))return res.sendStatus(401);try{return res.json({ok:true,processed:await processQueue()});}catch(e){console.error(e);return res.sendStatus(500);}});
 function isAdmin(req) {
   const expected = process.env.ADMIN_TOKEN || '';
