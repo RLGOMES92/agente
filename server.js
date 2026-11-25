@@ -83,8 +83,8 @@ app.get('/webhook', (req, res) => {
 
 app.post('/webhook', async (req,res)=>{
  const secret=process.env.APP_SECRET||'',signature=req.get('x-hub-signature-256')||'';
- if(!secret&&process.env.NODE_ENV==='production')return res.sendStatus(503);
- if(secret&&!verifyMetaSignature(req.raw,signature,secret))return res.sendStatus(401);
+ if(!secret)return res.sendStatus(503);
+ if(!verifyMetaSignature(req.raw,signature,secret))return res.sendStatus(401);
  let queued=false;
  try{for(const entry of req.body?.entry||[])for(const change of entry.changes||[]){
   const value=change.value||{},company=byPhoneId[value.metadata?.phone_number_id];if(!company)continue;
