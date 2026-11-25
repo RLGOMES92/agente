@@ -417,6 +417,13 @@ export async function hasHandoffForInbound(inboundId) {
   return Array.isArray(rows) && rows.length > 0;
 }
 
+export async function getHandoffForInbound(inboundId) {
+  const rows = await request('message_handoffs', {
+    query: { select: 'company_id,phone,summary', inbound_message_id: `eq.${inboundId}`, limit: 1 },
+  });
+  return rows?.[0] || null;
+}
+
 export async function enqueueOutbound(companyId, destination, body, idempotencyKey) {
   const rows = await request('message_outbox', {
     method: 'POST',
