@@ -39,6 +39,8 @@ async function ensureInitialized() {
 }
 if (!process.env.APP_SECRET) console.warn('[SEGURANÇA] APP_SECRET ausente: webhooks serão rejeitados em qualquer ambiente.');
 const app = express();
+// Vercel sits behind one trusted proxy; use its forwarded client IP for rate limiting.
+app.set('trust proxy', 1);
 const scrypt = promisify(crypto.scrypt);
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const USER_ROLES = new Set(['platform_admin', 'company_admin', 'operator', 'viewer']);
