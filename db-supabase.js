@@ -396,6 +396,49 @@ export async function hasCustomerReplyForInbound(inboundId) {
   return Array.isArray(rows) && rows.length > 0;
 }
 
+export async function saveInboundResponse(response) {
+  await request('inbound_responses', {
+    method: 'POST',
+    query: { on_conflict: 'inbound_message_id' },
+    body: {
+      inbound_message_id: response.inbound_message_id,
+      company_id: response.company_id,
+      phone: response.phone,
+      inbound_text: response.inbound_text || '',
+      assistant_content: response.assistant_content,
+      customer_reply: response.customer_reply,
+      should_handoff: Boolean(response.should_handoff),
+      handoff_summary: String(response.handoff_summary || '').slice(0, 1000),
+    },
+    prefer: 'resolution=ignore-duplicates,return=minimal',
+  });
+  return getInboundResponse(response.inbound_message_id);
+}
+
+export async function getInboundResponse(inboundId) {
+  const rows = await request('inbound_responses', {
+    query: {
+      select: 'inbound_message_id,company_id,phone,inbound_text,assistant_content,customer_reply,should_handoff,handoff_summary,history_saved',
+      inbound_message_id: `eq.${inboundId}`,
+      limit: 1,
+    },
+  });
+  return rows?.[0] || null;
+}
+
+export async function commitInboundResponseHistory(inboundId) {
+  return Boolean(await rpc('commit_inbound_response_history', { p_inbound_message_id: inboundId }));
+}
+
+export async function purgeInboundResponses() {
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  return request('inbound_responses', {
+    method: 'DELETE',
+    query: { created_at: `lt.${cutoff}` },
+    prefer: 'return=minimal',
+  });
+}
+
 export async function markHandoffInbound(companyId, phone, inboundId, summary = '') {
   return request('message_handoffs', {
     method: 'POST',
