@@ -359,6 +359,62 @@ export async function claimMessageJobs(limit = 10) {
   return (rows || []).map((row) => ({ ...row, id: Number(row.id), attempts: Number(row.attempts) }));
 }
 
+export async function enqueueOutbound(companyId, destination, body, idempotencyKey) {
+  const rows = await request('message_outbox', {
+    method: 'POST',
+    query: { on_conflict: 'idempotency_key' },
+    body: { company_id: companyId, destination, body, idempotency_key: idempotencyKey },
+    prefer: 'resolution=ignore-duplicates,return=representation',
+  });
+  return Array.isArray(rows) && rows.length === 1;
+}
+
+export async function claimOutbound(limit = 10) {
+  assertConfigured();
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/claim_message_outbox`, {
+    method: 'POST',
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ p_limit: safeLimit(limit, 10, 20) }),
+  });
+  const raw = await response.text();
+  let rows;
+  try { rows = raw ? JSON.parse(raw) : []; } catch { rows = []; }
+  if (!response.ok) throw new Error(`Supabase claim_message_outbox (${response.status}): ${rows?.message || 'request failed'}`);
+  return (rows || []).map(row => ({ ...row, id: Number(row.id), attempts: Number(row.attempts) }));
+}
+
+export async function completeOutbound(id, providerMessageId = null) {
+  return request('message_outbox', {
+    method: 'PATCH', query: { id: `eq.${id}` },
+    body: { status: 'sent', sent_at: new Date().toISOString(), locked_at: null, provider_message_id: providerMessageId },
+    prefer: 'return=minimal',
+  });
+}
+
+export async function failOutbound(id, attempts, error) {
+  const terminal = Number(attempts) >= 8;
+  const delayMs = Math.min(60 * 60 * 1000, 30 * 1000 * 2 ** Math.max(0, Number(attempts) - 1);
+  return request('message_outbox', {
+    method: 'PATCH', query: { id: `eq.${id}` },
+    body: {
+      status: terminal ? 'failed' : 'pending',
+      available_at: new Date(Date.now() + delayMs).toISOString(),
+      locked_at: null,
+      last_error: String(error?.message || error || 'unknown').slice(0, 1000),
+    },
+    prefer: 'return=minimal',
+  });
+}
+
+export async function purgeOutbound() {
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  return request('message_outbox', {
+    method: 'DELETE',
+    query: { status: 'in.(sent,failed)', created_at: `lt.${cutoff}` },
+    prefer: 'return=minimal',
+  });
+}
+
 export async function purgeMessageJobs() {
   const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   return request('message_jobs', {
