@@ -42,7 +42,6 @@ const app = express();
 const scrypt = promisify(crypto.scrypt);
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const USER_ROLES = new Set(['platform_admin', 'company_admin', 'operator', 'viewer']);
-const loginAttempts = new Map();
 const root = path.dirname(fileURLToPath(import.meta.url));
 const companyIdPattern = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 const tokenEnvPattern = /^[A-Z][A-Z0-9_]{2,63}$/;
@@ -196,20 +195,8 @@ async function sessionUser(req) {
   return await db.getSessionUser(crypto.createHash('sha256').update(token).digest('hex')) || null;
 }
 function loginKeys(ip, email) {
-  const emailKey = crypto.createHash('sha256').update(String(email || '').toLowerCase()).digest('hex');
-  return [`ip:${ip}`, `email:${emailKey}`];
-}
-function loginBlocked(keys) {
-  const now = Date.now();
-  return keys.some((key) => {
-    const entry = loginAttempts.get(key);
-    if (!entry) return false;
-    if (now - entry.startedAt > 15 * 60 * 1000) {
-      loginAttempts.delete(key);
-      return false;
-    }
-    return entry.count >= 8;
-  });
+  const digest = (value) => crypto.createHash('sha256').update(value).digest('hex');
+  return [digest(`ip:${ip}`), digest(`email:${String(email || '').toLowerCase()}`)];
 }
 async function audit(action, user = null, targetType = null, targetId = null, metadata = {}) {
   try {
@@ -223,20 +210,11 @@ async function audit(action, user = null, targetType = null, targetId = null, me
     console.error('[AUDITORIA] Falha ao registrar evento:', error.message);
   }
 }
-function recordLoginFailure(keys) {
-  const now = Date.now();
-  for (const key of keys) {
-    const entry = loginAttempts.get(key);
-    if (!entry || now - entry.startedAt > 15 * 60 * 1000) loginAttempts.set(key, { count: 1, startedAt: now });
-    else entry.count += 1;
-  }
-}
-
 app.post('/auth/login', async (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
   const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
   const keys = loginKeys(ip, email);
-  if (loginBlocked(keys)) return res.status(429).json({ ok: false, error: 'Muitas tentativas. Aguarde 15 minutos.' });
+  if (await db.isLoginBlocked(keys)) return res.status(429).json({ ok: false, error: 'Muitas tentativas. Aguarde 15 minutos.' });
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
   if (!email || email.length > 254 || password.length > 1024) return res.status(400).json({ ok: false, error: 'Credenciais inválidas.' });
   const user = await db.getUserByEmail(email);
@@ -244,10 +222,11 @@ app.post('/auth/login', async (req, res) => {
   const candidate = await scrypt(password, salt, 64);
   const expected = user ? Buffer.from(user.password_hash, 'hex') : Buffer.alloc(64);
   if (!user || !user.active || expected.length !== candidate.length || !crypto.timingSafeEqual(expected, candidate)) {
-    recordLoginFailure(keys);
+    const blocked = await db.recordLoginFailure(keys);
+    if (blocked) return res.status(429).json({ ok: false, error: 'Muitas tentativas. Aguarde 15 minutos.' });
     return res.status(401).json({ ok: false, error: 'E-mail ou senha inválidos.' });
   }
-  for (const key of keys) loginAttempts.delete(key);
+  await db.clearLoginAttempts(keys);
   const token = crypto.randomBytes(32).toString('base64url');
   const expiresAt = Date.now() + SESSION_TTL_MS;
   await db.createUserSession(crypto.createHash('sha256').update(token).digest('hex'), user.id, expiresAt);
@@ -477,12 +456,10 @@ app.post('/admin/resume', async (req, res) => {
   return res.json({ ok: true });
 });
 
-app.get('/health', (_req, res) => res.json({
-  ok: true,
-  service: 'agente-whatsapp',
-  companies: Object.keys(companies).length,
-  whatsappConfigured: Object.keys(byPhoneId).length > 0,
-}));
+app.get('/health', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  return res.json({ ok: true, service: 'agente-whatsapp' });
+});
 
 app.use((error, _req, res, _next) => {
   console.error('[HTTP] Erro na requisição:', error);
@@ -491,10 +468,5 @@ app.use((error, _req, res, _next) => {
   return res.status(status).json({ ok: false, error: status >= 500 ? 'Erro interno do servidor.' : 'Requisição inválida.' });
 });
 
-setInterval(() => {
-  const cutoff = Date.now() - 15 * 60 * 1000;
-  for (const [ip, entry] of loginAttempts) if (entry.startedAt < cutoff) loginAttempts.delete(ip);
-  while (loginAttempts.size > 10000) loginAttempts.delete(loginAttempts.keys().next().value);
-}, 5 * 60 * 1000).unref();
 export default app;
 if (!process.env.VERCEL) app.listen(process.env.PORT || 3000, () => console.log('Agente no ar'));
