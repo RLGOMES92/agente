@@ -208,10 +208,10 @@ async function processOutboundQueue() {
       const company = companies[job.company_id];
       if (!company) throw new Error('Empresa não encontrada para mensagem de saída');
       const result = await sendText(company, job.destination, job.body);
-      await db.completeOutbound(job.id, result?.messages?.[0]?.id || null);
+      await db.completeOutbound(job.id, job.lease_token, result?.messages?.[0]?.id || null);
     } catch (error) {
       console.error('[OUTBOX] Falha no envio; mensagem será reprocessada:', error);
-      await db.failOutbound(job.id, job.attempts, error);
+      await db.failOutbound(job.id, job.attempts, error, job.lease_token);
     }
   }
   return processed;
@@ -236,10 +236,10 @@ async function processQueue() {
       const company = companies[job.company_id];
       if (!company) throw new Error('Empresa não encontrada');
       await handle(company, job.payload);
-      await db.completeMessageJob(job.id);
+      await db.completeMessageJob(job.id, job.lease_token);
     } catch (error) {
       console.error('[JOB]', error);
-      await db.failMessageJob(job.id, job.attempts, error);
+      await db.failMessageJob(job.id, job.attempts, error, job.lease_token);
     }
   }
 
