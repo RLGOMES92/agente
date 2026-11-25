@@ -248,14 +248,14 @@ app.get('/auth/me', async (req, res) => {
 
 app.post('/auth/logout', async (req, res) => {
   const token = bearerToken(req);
-  const user = sessionUser(req);
+  const user = await sessionUser(req);
   if (token) await db.deleteUserSession(crypto.createHash('sha256').update(token).digest('hex'));
   if (user) await audit('auth.logout', user, 'user', String(user.id));
   return res.json({ ok: true });
 });
 
 app.post('/auth/change-password', async (req, res) => {
-  const user = sessionUser(req);
+  const user = await sessionUser(req);
   if (!user) return res.sendStatus(401);
   const currentPassword = typeof req.body?.current_password === 'string' ? req.body.current_password : '';
   if (!currentPassword || currentPassword.length > 1024) return res.status(400).json({ ok: false, error: 'Senha atual inválida.' });
@@ -280,7 +280,7 @@ app.post('/auth/change-password', async (req, res) => {
 });
 
 app.get('/tenant/audit', async (req, res) => {
-  const user = sessionUser(req);
+  const user = await sessionUser(req);
   if (!user) return res.sendStatus(401);
   if (!user.company_id || !['company_admin', 'operator', 'viewer'].includes(user.role)) return res.sendStatus(403);
   if (user.role !== 'company_admin') return res.sendStatus(403);
@@ -322,14 +322,14 @@ app.post('/admin/users', async (req, res) => {
     await audit('admin.user_created', null, 'user', String(id), { role, company_id: companyId });
     return res.status(201).json({ ok: true, user: await db.getUserById(id) });
   } catch (error) {
-    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ ok: false, error: 'Este e-mail já está cadastrado.' });
+    if (['23505', 'SQLITE_CONSTRAINT_UNIQUE'].includes(error.code)) return res.status(409).json({ ok: false, error: 'Este e-mail já está cadastrado.' });
     console.error('[ADMIN] Falha ao criar usuário:', error);
     return res.status(500).json({ ok: false, error: 'Não foi possível criar o usuário.' });
   }
 });
 
 app.get('/tenant/users', async (req, res) => {
-  const user = sessionUser(req);
+  const user = await sessionUser(req);
   if (!user) return res.sendStatus(401);
   if (user.role !== 'company_admin' || !user.company_id) return res.sendStatus(403);
   res.set('Cache-Control', 'no-store');
@@ -337,7 +337,7 @@ app.get('/tenant/users', async (req, res) => {
 });
 
 app.post('/tenant/users', async (req, res) => {
-  const user = sessionUser(req);
+  const user = await sessionUser(req);
   if (!user) return res.sendStatus(401);
   if (user.role !== 'company_admin' || !user.company_id) return res.sendStatus(403);
   const { email, password, role } = req.body || {};
@@ -356,14 +356,14 @@ app.post('/tenant/users', async (req, res) => {
     await audit('tenant.user_created', user, 'user', String(id), { role });
     return res.status(201).json({ ok: true, user: await db.getUserById(id) });
   } catch (error) {
-    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ ok: false, error: 'Este e-mail já está cadastrado.' });
+    if (['23505', 'SQLITE_CONSTRAINT_UNIQUE'].includes(error.code)) return res.status(409).json({ ok: false, error: 'Este e-mail já está cadastrado.' });
     console.error('[TENANT] Falha ao criar usuário da empresa:', error);
     return res.status(500).json({ ok: false, error: 'Não foi possível criar o usuário.' });
   }
 });
 
 app.post('/tenant/users/:id/disable', async (req, res) => {
-  const user = sessionUser(req);
+  const user = await sessionUser(req);
   if (!user) return res.sendStatus(401);
   if (user.role !== 'company_admin' || !user.company_id) return res.sendStatus(403);
   const id = Number.parseInt(req.params.id, 10);
@@ -376,7 +376,7 @@ app.post('/tenant/users/:id/disable', async (req, res) => {
 });
 
 app.get('/tenant/overview', async (req, res) => {
-  const user = sessionUser(req);
+  const user = await sessionUser(req);
   if (!user) return res.sendStatus(401);
   if (!user.company_id || !['company_admin', 'operator', 'viewer'].includes(user.role)) return res.sendStatus(403);
   res.set('Cache-Control', 'no-store');
