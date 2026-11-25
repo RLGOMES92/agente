@@ -393,7 +393,7 @@ export async function completeOutbound(id, providerMessageId = null) {
 
 export async function failOutbound(id, attempts, error) {
   const terminal = Number(attempts) >= 8;
-  const delayMs = Math.min(60 * 60 * 1000, 30 * 1000 * 2 ** Math.max(0, Number(attempts) - 1);
+  const delayMs = Math.min(60 * 60 * 1000, 30 * 1000 * 2 ** Math.max(0, Number(attempts) - 1));
   return request('message_outbox', {
     method: 'PATCH', query: { id: `eq.${id}` },
     body: {
