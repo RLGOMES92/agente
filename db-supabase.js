@@ -39,6 +39,36 @@ async function request(table, { method = 'GET', query = {}, body, prefer } = {})
   return data;
 }
 
+async function rpc(name, params) {
+  assertConfigured();
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(params),
+  });
+  const raw = await response.text();
+  let data;
+  try { data = raw ? JSON.parse(raw) : null; } catch { data = raw; }
+  if (!response.ok) throw new Error(`Supabase RPC ${name} (${response.status}): ${data?.message || 'request failed'}`);
+  return data;
+}
+
+export async function isLoginBlocked(keys) {
+  return Boolean(await rpc('check_login_attempts', { p_keys: keys }));
+}
+
+export async function recordLoginFailure(keys) {
+  return Boolean(await rpc('record_login_failure', { p_keys: keys }));
+}
+
+export async function clearLoginAttempts(keys) {
+  return rpc('clear_login_attempts', { p_keys: keys });
+}
+
 const iso = (value) => new Date(Number(value)).toISOString();
 const ms = (value) => value ? new Date(value).getTime() : null;
 const safeLimit = (value, fallback = 50, max = 100) =>
