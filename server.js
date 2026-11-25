@@ -149,7 +149,7 @@ async function handle(company, msg) {
         inbound_message_id: inboundId,
         company_id: company.id,
         phone,
-        inbound_text: '',
+        inbound_text: `[Mensagem não textual: ${msg.type || 'desconhecido'}]`,
         assistant_content: 'Cliente enviou conteúdo não textual; encaminhar para atendimento humano.',
         customer_reply: 'Recebi sua mensagem! 😊 Vou encaminhar para nossa equipe continuar o atendimento.',
         should_handoff: true,
