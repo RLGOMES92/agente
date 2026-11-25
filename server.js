@@ -159,7 +159,7 @@ async function handle(company, msg) {
   await notifyCustomer(company, phone, text);
 }
 
-async function processQueue(){await ensureInitialized();await db.purgeSeen();await db.purgeUserSessions();const jobs=await db.claimMessageJobs(10);for(const j of jobs){try{const co=companies[j.company_id];if(!co)throw Error('Empresa não encontrada');await handle(co,j.payload);await db.completeMessageJob(j.id);}catch(e){console.error('[JOB]',e);await db.failMessageJob(j.id,j.attempts,e);}}return jobs.length;}
+async function processQueue(){await ensureInitialized();await db.purgeSeen();await db.purgeUserSessions();await db.purgeMessageJobs();const jobs=await db.claimMessageJobs(10);for(const j of jobs){try{const co=companies[j.company_id];if(!co)throw Error('Empresa não encontrada');await handle(co,j.payload);await db.completeMessageJob(j.id);}catch(e){console.error('[JOB]',e);await db.failMessageJob(j.id,j.attempts,e);}}return jobs.length;}
 app.get('/worker',async(req,res)=>{const secret=process.env.CRON_SECRET||'',p=(req.get('authorization')||'').replace(/^Bearer\\s+/i,''),a=Buffer.from(p),b=Buffer.from(secret);if(!secret||a.length!==b.length||!crypto.timingSafeEqual(a,b))return res.sendStatus(401);try{return res.json({ok:true,processed:await processQueue()});}catch(e){console.error(e);return res.sendStatus(500);}});
 function isAdmin(req) {
   const expected = process.env.ADMIN_TOKEN || '';
