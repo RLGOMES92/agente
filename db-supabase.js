@@ -31,7 +31,10 @@ async function request(table, { method = 'GET', query = {}, body, prefer } = {})
   try { data = raw ? JSON.parse(raw) : null; } catch { data = raw; }
   if (!response.ok) {
     const message = typeof data === 'object' ? (data?.message || data?.hint || data?.details || data?.error) : data;
-    throw new Error(`Supabase ${method} ${table} (${response.status}): ${message || 'request failed'}`);
+    const error = new Error(`Supabase ${method} ${table} (${response.status}): ${message || 'request failed'}`);
+    error.code = data?.code || null;
+    error.status = response.status;
+    throw error;
   }
   return data;
 }
