@@ -473,6 +473,15 @@ export async function purgeOutbound() {
   });
 }
 
+export async function purgeHandoffs() {
+  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  return request('message_handoffs', {
+    method: 'DELETE',
+    query: { created_at: `lt.${cutoff}` },
+    prefer: 'return=minimal',
+  });
+}
+
 export async function purgeMessageJobs() {
   const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   return request('message_jobs', {
