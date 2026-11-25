@@ -121,7 +121,6 @@ async function notifyCustomer(company, phone, message, inboundId, suffix = 'cust
 }
 
 async function handle(company, msg) {
-  // Persist inbound dedupe separately from outbound delivery; replies are stored before sending.
   const phone = msg.from;
   const inboundId = msg.id;
   if (inboundId && await db.hasCustomerReplyForInbound(inboundId)) {
@@ -139,38 +138,63 @@ async function handle(company, msg) {
     return;
   }
 
-  const priorHandoff = inboundId ? await db.getHandoffForInbound(inboundId) : null;
-  if (priorHandoff) {
-    // Resume the same handoff instead of calling the AI again after a partial failure.
-    await handoff(company, phone, priorHandoff.summary, inboundId);
-    await notifyCustomer(company, phone, FALLBACK_HANDOFF, inboundId);
-    return;
+  // A saved response is authoritative: retries finish history, handoff and outbox without calling the AI again.
+  let response = inboundId ? await db.getInboundResponse(inboundId) : null;
+  if (!response) {
+    await db.touchConversation(company.id, phone);
+    if (await db.isPaused(company.id, phone)) return;
+
+    if (msg.type !== 'text' || typeof msg.text?.body !== 'string' || !msg.text.body.trim()) {
+      response = await db.saveInboundResponse({
+        inbound_message_id: inboundId,
+        company_id: company.id,
+        phone,
+        inbound_text: '',
+        assistant_content: 'Cliente enviou conteúdo não textual; encaminhar para atendimento humano.',
+        customer_reply: 'Recebi sua mensagem! 😊 Vou encaminhar para nossa equipe continuar o atendimento.',
+        should_handoff: true,
+        handoff_summary: `Cliente enviou conteúdo do tipo ${msg.type || 'desconhecido'}`,
+      });
+    } else {
+      const inboundText = msg.text.body.trim();
+      let raw;
+      try {
+        const history = [...await db.getHistory(company.id, phone), { role: 'user', content: inboundText }];
+        raw = await askClaude(company.system, history);
+      } catch (error) {
+        console.error('[CLAUDE] Erro ao gerar resposta:', error);
+        response = await db.saveInboundResponse({
+          inbound_message_id: inboundId,
+          company_id: company.id,
+          phone,
+          inbound_text: inboundText,
+          assistant_content: FALLBACK_HANDOFF,
+          customer_reply: FALLBACK_HANDOFF,
+          should_handoff: true,
+          handoff_summary: 'Erro técnico na IA',
+        });
+      }
+
+      if (!response) {
+        const parsed = parseReply(raw);
+        response = await db.saveInboundResponse({
+          inbound_message_id: inboundId,
+          company_id: company.id,
+          phone,
+          inbound_text: inboundText,
+          assistant_content: raw,
+          customer_reply: parsed.text,
+          should_handoff: parsed.handoff,
+          handoff_summary: parsed.summary,
+        });
+      }
+    }
   }
 
-  await db.touchConversation(company.id, phone);
-  if (await db.isPaused(company.id, phone)) return;
-
-  if (msg.type !== 'text' || typeof msg.text?.body !== 'string' || !msg.text.body.trim()) {
-    await handoff(company, phone, `Cliente enviou conteúdo do tipo ${msg.type || 'desconhecido'}`, inboundId);
-    await notifyCustomer(company, phone, 'Recebi sua mensagem! 😊 Vou encaminhar para nossa equipe continuar o atendimento.', inboundId);
-    return;
-  }
-
-  await db.addMessage(company.id, phone, 'user', msg.text.body.trim());
-  let raw;
-  try {
-    raw = await askClaude(company.system, await db.getHistory(company.id, phone));
-  } catch (error) {
-    console.error('[CLAUDE] Erro ao gerar resposta:', error);
-    await handoff(company, phone, 'Erro técnico na IA', inboundId);
-    await notifyCustomer(company, phone, FALLBACK_HANDOFF, inboundId);
-    return;
-  }
-
-  const { text, handoff: shouldHandoff, summary } = parseReply(raw);
-  await db.addMessage(company.id, phone, 'assistant', raw);
-  if (shouldHandoff) await handoff(company, phone, summary, inboundId);
-  await notifyCustomer(company, phone, text, inboundId);
+  if (!response) throw new Error('Não foi possível persistir a resposta da mensagem recebida.');
+  await db.commitInboundResponseHistory(inboundId);
+  if (response.should_handoff) await handoff(company, phone, response.handoff_summary, inboundId);
+  await notifyCustomer(company, phone, response.customer_reply, inboundId);
 }
 
 async function processOutboundQueue() {
@@ -189,7 +213,7 @@ async function processOutboundQueue() {
   return jobs.length;
 }
 
-async function processQueue(){await ensureInitialized();await db.purgeSeen();await db.purgeUserSessions();await db.purgeMessageJobs();await db.purgeOutbound();await db.purgeHandoffs();const jobs=await db.claimMessageJobs(10);for(const j of jobs){try{const co=companies[j.company_id];if(!co)throw Error('Empresa não encontrada');await handle(co,j.payload);await db.completeMessageJob(j.id);}catch(e){console.error('[JOB]',e);await db.failMessageJob(j.id,j.attempts,e);}}const outbound=await processOutboundQueue();return jobs.length+outbound;}
+async function processQueue(){await ensureInitialized();await db.purgeSeen();await db.purgeUserSessions();await db.purgeMessageJobs();await db.purgeOutbound();await db.purgeHandoffs();await db.purgeInboundResponses();const jobs=await db.claimMessageJobs(10);for(const j of jobs){try{const co=companies[j.company_id];if(!co)throw Error('Empresa não encontrada');await handle(co,j.payload);await db.completeMessageJob(j.id);}catch(e){console.error('[JOB]',e);await db.failMessageJob(j.id,j.attempts,e);}}const outbound=await processOutboundQueue();return jobs.length+outbound;}
 app.get('/worker',async(req,res)=>{const secret=process.env.CRON_SECRET||'',p=bearerToken(req),a=Buffer.from(p),b=Buffer.from(secret);if(!secret||a.length!==b.length||!crypto.timingSafeEqual(a,b))return res.sendStatus(401);try{return res.json({ok:true,processed:await processQueue()});}catch(e){console.error(e);return res.sendStatus(500);}});
 function isAdmin(req) {
   const expected = process.env.ADMIN_TOKEN || '';
