@@ -197,3 +197,5 @@ O backend aceita a chave nova `sb_secret_...` e a chave legada `service_role`. A
 
 ### Agendamento do worker
 O endpoint `GET /worker` precisa ser chamado periodicamente com `Authorization: Bearer $CRON_SECRET`. Esta branch ainda não contém `vercel.json` nem um agendamento ativo. O projeto Vercel atual está no plano Hobby, que permite Cron no máximo uma vez por dia; isso não atende à recuperação de filas a cada 1–5 minutos. Use um agendador externo que chame o endpoint a cada 5 minutos ou um plano Vercel com intervalo de um minuto. Nunca exponha `CRON_SECRET`.
+
+Atenção: a Vercel Hobby é destinada a projetos pessoais e não comerciais. Antes de operar o agente para clientes/atividade comercial, confirme um plano ou hospedagem cujos termos permitam esse uso.
