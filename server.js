@@ -46,7 +46,7 @@ const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const USER_ROLES = new Set(['platform_admin', 'company_admin', 'operator', 'viewer']);
 const root = path.dirname(fileURLToPath(import.meta.url));
 const companyIdPattern = /^[a-z0-9][a-z0-9_-]{0,39}$/;
-const tokenEnvPattern = /^[A-Z][A-Z0-9_]{2,63}$/;
+const tokenEnvPattern = /^WA_TOKEN_[A-Z0-9_]{1,56}$/;
 const companyVariableKeys = [
   'NOME_EMPRESA', 'OBJETIVO_FINAL', 'TOM_DE_VOZ', 'EMOJIS',
   'REGRAS_ESPECIFICAS', 'DADOS_INSTITUCIONAIS', 'CATALOGO_PRECOS',
@@ -56,7 +56,7 @@ const companyVariableKeys = [
 function validateCompanyConfig(id, input) {
   if (!companyIdPattern.test(id) || id.startsWith('_')) return 'Identificador inválido.';
   if (!input || typeof input !== 'object' || Array.isArray(input)) return 'Configuração inválida.';
-  if (typeof input.phone_number_id !== 'string' || input.phone_number_id.length > 80) return 'phone_number_id inválido.';
+  if (typeof input.phone_number_id !== 'string' || (input.phone_number_id && !/^\\d{8,30}$/.test(input.phone_number_id))) return 'phone_number_id deve conter somente de 8 a 30 dígitos.';
   if (typeof input.team_number !== 'string' || (input.team_number && !/^\d{8,15}$/.test(input.team_number))) return 'team_number deve conter de 8 a 15 dígitos.';
   if (typeof input.token_env !== 'string' || !tokenEnvPattern.test(input.token_env)) return 'token_env inválido.';
   if (!input.variables || typeof input.variables !== 'object' || Array.isArray(input.variables)) return 'variables é obrigatório.';
