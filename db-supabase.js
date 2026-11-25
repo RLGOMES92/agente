@@ -8,6 +8,15 @@ function assertConfigured() {
   }
 }
 
+function apiKeyHeaders() {
+  const headers = { apikey: SUPABASE_KEY };
+  // New sb_secret_* keys are API keys, not JWTs; never send them as Bearer tokens.
+  if (!SUPABASE_KEY.startsWith('sb_secret_')) {
+    headers.Authorization = `Bearer ${SUPABASE_KEY}`;
+  }
+  return headers;
+}
+
 async function request(table, { method = 'GET', query = {}, body, prefer } = {}) {
   assertConfigured();
   const url = new URL(`${SUPABASE_URL}/rest/v1/${table}`);
@@ -15,8 +24,7 @@ async function request(table, { method = 'GET', query = {}, body, prefer } = {})
     if (value !== undefined && value !== null) url.searchParams.set(key, String(value));
   }
   const headers = {
-    apikey: SUPABASE_KEY,
-    Authorization: `Bearer ${SUPABASE_KEY}`,
+    ...apiKeyHeaders(),
     Accept: 'application/json',
   };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -44,8 +52,7 @@ async function rpc(name, params) {
   const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
     method: 'POST',
     headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
+      ...apiKeyHeaders(),
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(params),
@@ -376,8 +383,7 @@ export async function claimMessageJobs(limit = 10) {
   const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/claim_message_jobs`, {
     method: 'POST',
     headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
+      ...apiKeyHeaders(),
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ p_limit: safeLimit(limit, 10, 20) }),
@@ -481,7 +487,7 @@ export async function claimOutbound(limit = 10) {
   assertConfigured();
   const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/claim_message_outbox`, {
     method: 'POST',
-    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': 'application/json' },
+    headers: { ...apiKeyHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ p_limit: safeLimit(limit, 10, 20) }),
   });
   const raw = await response.text();
