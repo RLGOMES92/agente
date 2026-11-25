@@ -93,7 +93,7 @@ Endpoints:
 - Nunca envie `.env`, tokens, chaves ou segredos para o GitHub.
 - O `.gitignore` protege o arquivo `.env` e o banco local.
 - Use tokens fortes e exclusivos para `VERIFY_TOKEN` e `ADMIN_TOKEN`.
-- Em produção, `APP_SECRET` é obrigatório: sem ele, `POST /webhook` responde `503`; com ele, toda requisição precisa apresentar `X-Hub-Signature-256` válida. Fora de produção, a assinatura pode ficar sem configuração apenas para desenvolvimento local.
+- `APP_SECRET` é obrigatório em todos os ambientes que recebem webhooks: sem ele, `POST /webhook` responde `503`; com ele, toda requisição precisa apresentar `X-Hub-Signature-256` válida. Configure um segredo de teste separado para desenvolvimento local.
 - `VERIFY_TOKEN` é obrigatório para a verificação inicial do webhook da Meta; `ADMIN_TOKEN` deve ser forte e exclusivo para proteger as rotas administrativas.
 - O login limita tentativas por IP e por conta (8 falhas em 15 minutos). O contador é mantido em memória; em múltiplas instâncias, configure também um limitador compartilhado no proxy/Redis.
 - A configuração da DaPaz é inicial e não contém preços nem dados de agenda; revise e complete a base antes de atendimento real.
