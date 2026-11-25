@@ -121,6 +121,7 @@ async function handle(company, msg) {
   // Persist inbound dedupe separately from outbound delivery; replies are stored before sending.
   const phone = msg.from;
   const inboundId = msg.id;
+  if (inboundId && await db.hasCustomerReplyForInbound(inboundId)) return;
 
   if (phone === company.team_number) {
     const command = msg.text?.body?.trim().match(/^#reativar\\s+(\\d{8,15})$/i);
