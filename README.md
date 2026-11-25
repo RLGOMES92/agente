@@ -37,15 +37,15 @@ Essa demonstração usa respostas simuladas locais. Ela permite visualizar o aco
 
 ## 2. Configuração da empresa
 
-A configuração fica em `companies/<empresa>.json`.
+Na versão da branch `main` (modo local), a configuração fica em `companies/<empresa>.json`. Na branch de migração, as configurações são armazenadas no Supabase.
 
 Para a DaPaz:
-- `phone_number_id`: Phone Number ID fornecido pela Meta (necessário para WhatsApp real).
-- `token_env`: nome da variável de ambiente que contém o token da Meta.
+- `phone_number_id`: Phone Number ID numérico fornecido pela Meta (8 a 30 dígitos; necessário para WhatsApp real).
+- `token_env`: nome da variável de ambiente que contém o token da Meta; deve começar com `WA_TOKEN_`.
 - `team_number`: número da equipe em formato internacional, somente dígitos. Também é possível definir `TEAM_NUMBER_DAPAZ` no ambiente; essa variável tem prioridade e evita gravar o telefone no GitHub. É necessário para receber os avisos de transbordo.
 - `variables`: informações usadas para preencher o prompt da empresa.
 
-Para cadastrar outra empresa, copie `companies/_modelo.json` para `companies/nome.json`, altere os dados e crie a variável de token correspondente no ambiente. Nunca coloque tokens diretamente nos arquivos JSON.
+Para a versão local/main, copie o modelo JSON. Na branch de migração, use o painel administrativo para cadastrar/editar tenants, que grava no Supabase. Tokens sempre ficam somente nas variáveis de ambiente.
 
 ## 3. Conectar ao WhatsApp Cloud API
 
@@ -53,7 +53,7 @@ Para cadastrar outra empresa, copie `companies/_modelo.json` para `companies/nom
 2. Configure o número que será usado pelo bot e obtenha o Phone Number ID.
 3. Gere um token de usuário do sistema com as permissões necessárias e acesso ao ativo WhatsApp.
 4. Preencha no ambiente: `WA_TOKEN_DAPAZ`, `TEAM_NUMBER_DAPAZ`, `APP_SECRET`, `VERIFY_TOKEN` e `ADMIN_TOKEN`. Defina `TEAM_NUMBER_DAPAZ` com o número da equipe em formato internacional, somente dígitos (ex.: DDI + DDD + número). Não coloque telefone real, tokens ou segredos no GitHub.
-5. Atualize `phone_number_id` e `team_number` em `companies/dapaz.json`.
+5. Na versão local, atualize `phone_number_id` e `team_number` em `companies/dapaz.json`; na migração, edite a configuração do tenant no painel/Supabase.
 6. Publique o servidor em HTTPS e configure o webhook `https://SEU-DOMINIO/webhook`, usando o mesmo `VERIFY_TOKEN`; assine o campo `messages`.
 
 A versão da Graph API é configurável por `WHATSAPP_API_VERSION` e o padrão atual do projeto é `v26.0`.
@@ -64,19 +64,19 @@ A versão da Graph API é configurável por `WHATSAPP_API_VERSION` e o padrão a
 - O servidor remove as tags, pausa o bot para aquele cliente e tenta avisar o número configurado em `team_number`.
 - A equipe reativa enviando ao número do bot: `#reativar 5511999999999`.
 - Também existe `POST /admin/resume`, com JSON `{ "company": "dapaz", "phone": "5511..." }` e header `x-admin-token`.
-- Áudio, imagem e outros tipos de arquivo são encaminhados para atendimento humano.
+- Áudio, imagem e outros tipos de arquivo são encaminhados para atendimento humano; o histórico registra o tipo de conteúdo recebido para dar contexto à equipe.
 
 O envio de mensagens de texto pela API da Meta depende da janela de atendimento do WhatsApp; para mensagens fora da janela, será necessário implementar e usar um template aprovado.
 
 ## 5. Banco de dados e publicação
 
-O histórico e a deduplicação de webhooks ficam no SQLite. Em hospedagens com disco efêmero, configure um volume persistente e defina `DB_PATH` para um caminho dentro dele. O Dockerfile usa `/data/agente.db`.
+A branch `main` utiliza SQLite local. A branch `feat/supabase-vercel-migration` usa Supabase para histórico, deduplicação, sessões, auditoria e fila persistente, preparada para execução serverless.
 
 Painel administrativo:
 - Abra `https://SEU-DOMINIO/painel/` no navegador.
 - Informe o `ADMIN_TOKEN`; o token fica somente na sessão atual do navegador.
 - O painel consulta `/admin/overview`, atualiza os indicadores automaticamente e permite reativar conversas pausadas. A reativação limpa o histórico da conversa.
-- Administradores também podem cadastrar e editar empresas pela seção **Empresas**. O cadastro valida o identificador, os campos obrigatórios e a unicidade do Phone Number ID. As configurações são salvas em `companies/<id>.json` e recarregadas pelo servidor sem reinício.
+- Administradores também podem cadastrar e editar empresas pela seção **Empresas**. O cadastro valida o identificador, os campos obrigatórios e a unicidade do Phone Number ID. Na branch `main`, as configurações são JSON local; na branch de migração, são salvas no Supabase e recarregadas.
 - O painel não armazena tokens da Meta: `token_env` guarda apenas o nome da variável de ambiente. Cadastre o valor secreto no ambiente de hospedagem antes de conectar a empresa.
 
 Endpoints:
@@ -93,9 +93,9 @@ Endpoints:
 - Nunca envie `.env`, tokens, chaves ou segredos para o GitHub.
 - O `.gitignore` protege o arquivo `.env` e o banco local.
 - Use tokens fortes e exclusivos para `VERIFY_TOKEN` e `ADMIN_TOKEN`.
-- Em produção, `APP_SECRET` é obrigatório: sem ele, `POST /webhook` responde `503`; com ele, toda requisição precisa apresentar `X-Hub-Signature-256` válida. Fora de produção, a assinatura pode ficar sem configuração apenas para desenvolvimento local.
+- `APP_SECRET` é obrigatório em todos os ambientes que recebem webhooks: sem ele, `POST /webhook` responde `503`; com ele, toda requisição precisa apresentar `X-Hub-Signature-256` válida. Configure um segredo de teste separado para desenvolvimento local.
 - `VERIFY_TOKEN` é obrigatório para a verificação inicial do webhook da Meta; `ADMIN_TOKEN` deve ser forte e exclusivo para proteger as rotas administrativas.
-- O login limita tentativas por IP e por conta (8 falhas em 15 minutos). O contador é mantido em memória; em múltiplas instâncias, configure também um limitador compartilhado no proxy/Redis.
+- O login limita tentativas por IP e por conta com controle persistente no Supabase (8 falhas em 15 minutos). As chaves são hashes SHA-256; um login válido limpa o contador da conta, mas preserva o contador agregado do IP até o fim da janela.
 - A configuração da DaPaz é inicial e não contém preços nem dados de agenda; revise e complete a base antes de atendimento real.
 
 
@@ -119,7 +119,7 @@ A autenticação de usuários é separada do acesso administrativo por `ADMIN_TO
 - `POST /tenant/users`: cria usuários `operator` ou `viewer` na própria empresa (somente `company_admin`).
 - `POST /tenant/users/:id/disable`: desativa operador/visualizador da própria empresa e revoga suas sessões; não permite desativar a própria conta nem administradores.
 
-As senhas são derivadas com scrypt e salt aleatório; o banco armazena apenas o hash. O token de sessão é armazenado como hash SHA-256. Tentativas de login por IP e por conta são limitadas temporariamente (8 falhas em 15 minutos), com limpeza periódica do controle em memória. Em múltiplas instâncias, use também um limitador compartilhado no proxy/Redis. A auditoria registra ações administrativas e de autenticação sem armazenar senhas, tokens ou conteúdo de mensagens. Não compartilhe tokens de sessão e use HTTPS em produção.
+As senhas são derivadas com scrypt e salt aleatório; o banco armazena apenas o hash. O token de sessão é armazenado como hash SHA-256. Tentativas de login por IP e por conta são limitadas de forma persistente no Supabase (8 falhas em 15 minutos), funcionando entre instâncias serverless. As chaves de limitação são hashes SHA-256, e o contador da conta é removido após autenticação válida; o contador do IP permanece até expirar para não permitir que uma conta válida zere o limite compartilhado por outros usuários. A tabela e as RPCs de controle são restritas à `service_role`. A auditoria registra ações administrativas e de autenticação sem armazenar senhas, tokens ou conteúdo de mensagens. Não compartilhe tokens de sessão e use HTTPS em produção.
 
 **Painel:** a tela `/painel/` oferece duas entradas: console administrativo via `ADMIN_TOKEN` e acesso da equipe via e-mail/senha. O acesso da equipe mostra somente os indicadores e conversas da empresa vinculada; o papel `company_admin` também pode cadastrar e desativar operadores/visualizadores da própria empresa.
 
@@ -133,3 +133,69 @@ curl -X POST "$BASE_URL/admin/users" \
 ```
 
 Depois, entre em `/painel/` pela opção **Acesso da equipe** usando o e-mail e a senha criados. Para vincular administradores e equipes a uma empresa, informe o `company_id` correspondente ao criar o usuário.
+
+
+## Deploy serverless (branch de migração)
+
+A versão desta branch troca a persistência SQLite por Supabase e adapta o Express para Vercel. **Não promover a produção até testar a integração e configurar os segredos.**
+
+### Variáveis privadas obrigatórias na Vercel
+- `SUPABASE_URL`: URL do projeto `agente-whatsapp`.
+- `SUPABASE_SECRET_KEY`: chave secret do Supabase (ou `SUPABASE_SERVICE_ROLE_KEY` legado). Nunca usar no frontend.
+- `ANTHROPIC_API_KEY`: chave de API para a IA.
+- `APP_SECRET`: segredo Meta usado para validar assinatura dos webhooks.
+- `VERIFY_TOKEN`: token escolhido para validação do webhook Meta.
+- `ADMIN_TOKEN`: token forte para console administrativo.
+- `CRON_SECRET`: token forte que protege o endpoint worker `/worker`.
+- `WA_TOKEN_DAPAZ`: token WhatsApp Cloud API da empresa DaPaz.
+- `TEAM_NUMBER_DAPAZ`: telefone da equipe com DDI, somente dígitos.
+- `WHATSAPP_API_VERSION`: opcional; padrão atual do código `v26.0`.
+
+Defina essas variáveis nos ambientes Production, Preview e Development conforme aplicável. Não coloque valores secretos no GitHub, no README, nem no chat.
+
+### Configuração Meta
+Webhook URL: `https://SEU-DOMINIO/webhook`
+Verify token: valor de `VERIFY_TOKEN`
+Eventos: `messages`
+Assinatura de payload: habilitar e fornecer `APP_SECRET`.
+
+### Worker persistente
+O webhook persiste cada evento antes de retornar HTTP 200 e tenta iniciar o processamento em background. Jobs podem ser recuperados pelo endpoint `/worker` autenticado com `Authorization: Bearer CRON_SECRET`. Configure um scheduler externo para chamar esse endpoint periodicamente para recuperar jobs pendentes; não dependa apenas do processamento em background.
+
+### Migrações
+As migrações do Supabase são versionadas em `supabase/migrations`. Tabelas do aplicativo têm RLS habilitado e não concedem acesso às roles `anon` e `authenticated`; o backend usa somente a chave secreta.
+
+
+### Outbox durável de mensagens enviadas
+O backend grava respostas ao cliente e alertas de transbordo em `message_outbox` antes de tentar enviar. A outbox tem chave idempotente, claim atômico, lease recuperável, backoff exponencial (até 8 tentativas) e registro do ID retornado pela Meta. O worker `/worker` processa tanto mensagens inbound como outbound; configure scheduler a cada 1–5 minutos. O worker agora reserva um job por vez imediatamente antes de processá-lo, evitando que mensagens no fim de um lote percam o lease enquanto aguardam chamadas anteriores.
+
+**Aplicação:** migração `20261126000100_add_durable_message_outbox.sql` adicionada ao repositório e aplicada ao projeto Supabase dedicado. Não é necessário reaplicar manualmente.
+
+**Limite importante:** envio é *at-least-once*. Se a Meta aceitar a mensagem e a conexão falhar antes de recebermos a confirmação, um retry pode entregar duplicado. A chave idempotente impede duplicar o registro interno, mas a API WhatsApp não oferece deduplicação de entrega garantida por essa chave. A resposta gerada para cada mensagem recebida é persistida em `inbound_responses` antes de gravar o histórico e enfileirar o envio. Uma RPC transacional grava as duas mensagens do histórico uma única vez; retries retomam o texto e a decisão de transbordo já salvos, sem chamar a IA novamente. Os registros são removidos após 30 dias. A guarda de inbound também evita gerar novamente a resposta quando ela já está persistida na outbox. A intenção de transbordo também é persistida em `message_handoffs` antes da pausa; se houver falha parcial entre o alerta da equipe, a pausa e a confirmação ao cliente, o retry retoma o mesmo transbordo e envia uma confirmação de contingência sem chamar a IA novamente. Marcadores antigos são removidos após 30 dias.
+
+### Validação antes de ativar atendimento
+- [ ] Executar `npm run check` e `npm test` localmente (Node 20+).
+- [ ] Testar webhook GET de verificação, assinatura inválida (401) e ausência de `APP_SECRET` (503).
+- [ ] Enviar mensagem de texto e verificar persistência de histórico e resposta.
+- [ ] Testar falha temporária Supabase/Meta e recuperação pelo worker.
+- [ ] Testar transbordo, equipe sem telefone, pausa e comando `#reativar`.
+- [ ] Confirmar isolamento entre tenants e autenticação administrativa.
+- [ ] Configurar scheduler para chamar `/worker` a cada 1–5 minutos, com `Authorization: Bearer CRON_SECRET`; não expor esse segredo em URL/logs.
+- [ ] Fazer deploy de Preview e validar antes de produção.
+
+
+### Segurança das reservas da fila
+Cada reserva inbound/outbound recebe um `lease_token` UUID novo. Concluir ou devolver um job à fila exige o mesmo token e o estado `processing`; se outro worker recuperar uma reserva expirada, o worker antigo não consegue alterar o estado da nova reserva. Isso protege as atualizações do banco contra workers obsoletos, mas não elimina a possibilidade de entrega duplicada se a Meta aceitar um envio e a confirmação se perder.
+
+### Testes do adaptador Supabase
+`npm test` inclui testes com `fetch` simulado para verificar que histórico, exclusão, visão geral e usuários são sempre filtrados pelo `company_id`, além das condições de propriedade das reservas da fila. `npm run check` também verifica a sintaxe desse arquivo de teste.
+
+Tentativas de login com e-mail ausente/malformado ou senha acima do limite também consomem o contador agregado por IP; entradas inválidas não podem contornar o rate limit enviando requisições repetidas com formato incorreto.
+
+O backend aceita a chave nova `sb_secret_...` e a chave legada `service_role`. A chave nova é enviada somente no header `apikey` (não é JWT); o header Bearer é mantido apenas para a chave legada JWT.
+
+
+### Agendamento do worker
+O endpoint `GET /worker` precisa ser chamado periodicamente com `Authorization: Bearer $CRON_SECRET`. Esta branch ainda não contém `vercel.json` nem um agendamento ativo. O projeto Vercel atual está no plano Hobby, que permite Cron no máximo uma vez por dia; isso não atende à recuperação de filas a cada 1–5 minutos. Use um agendador externo que chame o endpoint a cada 5 minutos ou um plano Vercel com intervalo de um minuto. Nunca exponha `CRON_SECRET`.
+
+Atenção: a Vercel Hobby é destinada a projetos pessoais e não comerciais. Antes de operar o agente para clientes/atividade comercial, confirme um plano ou hospedagem cujos termos permitam esse uso.

@@ -1,0 +1,69 @@
+-- Give each queue reservation an ownership token so an expired worker cannot
+-- complete or fail a job after another worker has reclaimed it.
+alter table public.message_jobs
+  add column if not exists lease_token uuid;
+alter table public.message_outbox
+  add column if not exists lease_token uuid;
+
+create or replace function public.claim_message_jobs(p_limit integer default 10)
+returns setof public.message_jobs
+language sql
+security definer
+set search_path = pg_catalog, public
+as $function$
+  with candidates as (
+    select id
+    from public.message_jobs
+    where available_at <= now()
+      and (
+        status = 'pending'
+        or (status = 'processing' and locked_at < now() - interval '5 minutes')
+      )
+    order by id
+    for update skip locked
+    limit greatest(1, least(coalesce(p_limit, 10), 20))
+  )
+  update public.message_jobs as jobs
+  set status = 'processing',
+      attempts = jobs.attempts + 1,
+      locked_at = now(),
+      lease_token = pg_catalog.gen_random_uuid(),
+      last_error = null
+  from candidates
+  where jobs.id = candidates.id
+  returning jobs.*;
+$function$;
+
+create or replace function public.claim_message_outbox(p_limit integer default 10)
+returns setof public.message_outbox
+language sql
+security definer
+set search_path = pg_catalog, public
+as $function$
+  with candidates as (
+    select id
+    from public.message_outbox
+    where available_at <= now()
+      and (
+        status = 'pending'
+        or (status = 'processing' and locked_at < now() - interval '5 minutes')
+      )
+    order by id
+    for update skip locked
+    limit greatest(1, least(coalesce(p_limit, 10), 20))
+  )
+  update public.message_outbox as outbox
+  set status = 'processing',
+      attempts = outbox.attempts + 1,
+      locked_at = now(),
+      lease_token = pg_catalog.gen_random_uuid(),
+      last_error = null
+  from candidates
+  where outbox.id = candidates.id
+  returning outbox.*;
+$function$;
+
+revoke all on function public.claim_message_jobs(integer) from public, anon, authenticated;
+revoke all on function public.claim_message_outbox(integer) from public, anon, authenticated;
+grant execute on function public.claim_message_jobs(integer) to service_role;
+grant execute on function public.claim_message_outbox(integer) to service_role;

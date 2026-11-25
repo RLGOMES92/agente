@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Anthropic from '@anthropic-ai/sdk';
+import { listCompanies } from './db-supabase.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const MODEL = process.env.MODEL || 'claude-sonnet-5-5';
@@ -60,4 +61,24 @@ export function parseReply(raw) {
   }
   if (handoff && !text) text = FALLBACK_HANDOFF;
   return { text, handoff, summary };
+}
+
+
+export async function loadCompaniesFromDatabase() {
+  const tpl = fs.readFileSync(path.join(root, 'prompt.template.txt'), 'utf8');
+  const rows = await listCompanies();
+  const out = {};
+  for (const row of rows) {
+    const company = {
+      id: row.id,
+      phone_number_id: row.phone_number_id || '',
+      token_env: row.token_env,
+      team_number: row.team_number || '',
+      variables: row.variables || {},
+      active: row.active !== false,
+    };
+    company.system = fill(tpl, company.variables, company.id);
+    out[company.id] = company;
+  }
+  return out;
 }

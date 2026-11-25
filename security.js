@@ -13,3 +13,10 @@ export function verifyMetaSignature(rawBody, signature, appSecret) {
   const calculated = Buffer.from(expected);
   return received.length === calculated.length && crypto.timingSafeEqual(received, calculated);
 }
+
+/** Parses the internal team's explicit command to resume a customer's bot. */
+export function parseReactivationCommand(value) {
+  if (typeof value !== 'string') return null;
+  const match = value.trim().match(/^#reativar\s+(\d{8,15})$/i);
+  return match?.[1] || null;
+}

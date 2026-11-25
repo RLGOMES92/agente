@@ -1,19 +1,20 @@
 import 'dotenv/config';
+import 'express-async-errors';
 import crypto from 'node:crypto';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { loadCompanies, askClaude, parseReply, FALLBACK_HANDOFF } from './agent.js';
+import { loadCompaniesFromDatabase, askClaude, parseReply, FALLBACK_HANDOFF } from './agent.js';
 import { sendText } from './whatsapp.js';
-import * as db from './db.js';
-import { verifyMetaSignature } from './security.js';
+import * as db from './db-supabase.js';
+import { waitUntil } from '@vercel/functions';
+import { verifyMetaSignature, parseReactivationCommand } from './security.js';
 
-let companies = loadCompanies();
+let companies = {};
 let byPhoneId = {};
-function refreshCompanies() {
-  companies = loadCompanies();
+async function refreshCompanies() {
+  companies = await loadCompaniesFromDatabase();
   for (const company of Object.values(companies)) {
     const envName = `TEAM_NUMBER_${company.id.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
     const configuredNumber = process.env[envName] || company.team_number || '';
@@ -25,23 +26,27 @@ function refreshCompanies() {
   byPhoneId = Object.fromEntries(Object.values(companies).filter((c) => c.phone_number_id).map((c) => [c.phone_number_id, c]));
   return companies;
 }
-refreshCompanies();
-console.log('Empresas carregadas:', Object.keys(companies).join(', '));
-for (const company of Object.values(companies)) {
-  if (!company.phone_number_id) console.warn(`[CONFIG] ${company.id}: phone_number_id ainda não configurado; WhatsApp não receberá mensagens.`);
-  if (!company.team_number) console.warn(`[CONFIG] ${company.id}: team_number ainda não configurado; avisos de transbordo não serão enviados.`);
+let initialization;
+async function ensureInitialized() {
+  if (!initialization) {
+    initialization = refreshCompanies().catch((error) => {
+      // Allow a later request to retry after a transient Supabase/network failure.
+      initialization = null;
+      throw error;
+    });
+  }
+  await initialization;
 }
-if (!process.env.APP_SECRET) console.warn('[SEGURANÇA] APP_SECRET ausente: webhooks serão rejeitados em produção.');
-
+if (!process.env.APP_SECRET) console.warn('[SEGURANÇA] APP_SECRET ausente: webhooks serão rejeitados em qualquer ambiente.');
 const app = express();
+// Vercel sits behind one trusted proxy; use its forwarded client IP for rate limiting.
+app.set('trust proxy', 1);
 const scrypt = promisify(crypto.scrypt);
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const USER_ROLES = new Set(['platform_admin', 'company_admin', 'operator', 'viewer']);
-const loginAttempts = new Map();
 const root = path.dirname(fileURLToPath(import.meta.url));
-const companiesDir = path.join(root, 'companies');
 const companyIdPattern = /^[a-z0-9][a-z0-9_-]{0,39}$/;
-const tokenEnvPattern = /^[A-Z][A-Z0-9_]{2,63}$/;
+const tokenEnvPattern = /^WA_TOKEN_[A-Z0-9_]{1,56}$/;
 const companyVariableKeys = [
   'NOME_EMPRESA', 'OBJETIVO_FINAL', 'TOM_DE_VOZ', 'EMOJIS',
   'REGRAS_ESPECIFICAS', 'DADOS_INSTITUCIONAIS', 'CATALOGO_PRECOS',
@@ -51,7 +56,7 @@ const companyVariableKeys = [
 function validateCompanyConfig(id, input) {
   if (!companyIdPattern.test(id) || id.startsWith('_')) return 'Identificador inválido.';
   if (!input || typeof input !== 'object' || Array.isArray(input)) return 'Configuração inválida.';
-  if (typeof input.phone_number_id !== 'string' || input.phone_number_id.length > 80) return 'phone_number_id inválido.';
+  if (typeof input.phone_number_id !== 'string' || (input.phone_number_id && !/^\d{8,30}$/.test(input.phone_number_id))) return 'phone_number_id deve conter somente de 8 a 30 dígitos.';
   if (typeof input.team_number !== 'string' || (input.team_number && !/^\d{8,15}$/.test(input.team_number))) return 'team_number deve conter de 8 a 15 dígitos.';
   if (typeof input.token_env !== 'string' || !tokenEnvPattern.test(input.token_env)) return 'token_env inválido.';
   if (!input.variables || typeof input.variables !== 'object' || Array.isArray(input.variables)) return 'variables é obrigatório.';
@@ -72,22 +77,11 @@ function safeCompanyConfig(company) {
     variables: company.variables || {},
   };
 }
-async function writeCompanyConfig(id, input) {
-  const destination = path.join(companiesDir, `${id}.json`);
-  const temporary = path.join(companiesDir, `.${id}.json.tmp`);
-  const config = {
-    id,
-    phone_number_id: input.phone_number_id || '',
-    token_env: input.token_env,
-    team_number: input.team_number || '',
-    variables: input.variables,
-  };
-  await fs.writeFile(temporary, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 });
-  await fs.rename(temporary, destination);
-}
 
-app.use('/painel', express.static(path.join(root, 'public'), { index: 'index.html', maxAge: '1h' }));
+app.use(express.static(path.join(root, 'public'), { index: 'index.html', maxAge: '1h' }));
+app.get('/painel', (_req,res)=>res.redirect(302,'/'));
 app.use(express.json({ limit: '1mb', verify: (req, _res, buf) => { req.raw = buf; } }));
+app.use(async (_req,res,next)=>{try{await ensureInitialized();next();}catch(e){console.error('[INIT]',e);res.status(503).json({ok:false,error:'Serviço indisponível.'});}});
 
 app.get('/webhook', (req, res) => {
   const { 'hub.mode': mode, 'hub.verify_token': token, 'hub.challenge': challenge } = req.query;
@@ -97,117 +91,162 @@ app.get('/webhook', (req, res) => {
   return res.sendStatus(403);
 });
 
-app.post('/webhook', (req, res) => {
-  const appSecret = process.env.APP_SECRET || '';
-  const signature = req.get('x-hub-signature-256') || '';
-  if (!appSecret && process.env.NODE_ENV === 'production') {
-    console.error('[SEGURANÇA] Webhook recusado: APP_SECRET não configurado em produção.');
-    return res.sendStatus(503);
-  }
-  if (appSecret && !verifyMetaSignature(req.raw, signature, appSecret)) return res.sendStatus(401);
-  if (!appSecret && process.env.NODE_ENV !== 'production') {
-    console.warn('[SEGURANÇA] Webhook sem assinatura aceito somente fora de produção.');
-  }
-
-  // Confirma o recebimento rapidamente; o processamento acontece na fila.
-  res.sendStatus(200);
-
-  for (const entry of req.body?.entry || []) {
-    for (const change of entry.changes || []) {
-      const value = change.value || {};
-      const company = byPhoneId[value.metadata?.phone_number_id];
-      if (!company) continue;
-      for (const message of value.messages || []) {
-        if (!message?.id || !message?.from || !message?.type) {
-          console.warn('[WEBHOOK] Mensagem ignorada: payload sem id, remetente ou tipo.');
-          continue;
-        }
-        enqueue(`${company.id}:${message.from}`, () => handle(company, message));
-      }
-    }
-  }
+app.post('/webhook', async (req,res)=>{
+ const secret=process.env.APP_SECRET||'',signature=req.get('x-hub-signature-256')||'';
+ if(!secret)return res.sendStatus(503);
+ if(!verifyMetaSignature(req.raw,signature,secret))return res.sendStatus(401);
+ let queued=false;
+ try{for(const entry of req.body?.entry||[])for(const change of entry.changes||[]){
+  const value=change.value||{},company=byPhoneId[value.metadata?.phone_number_id];if(!company)continue;
+  for(const msg of value.messages||[]){if(!msg?.id||!msg?.from||!msg?.type)continue;queued=(await db.enqueueMessageJob(company.id,msg.from,msg))||queued;}
+ }}catch(e){console.error('[WEBHOOK]',e);return res.sendStatus(503);}
+ res.sendStatus(200);if(queued){if(process.env.VERCEL)waitUntil(processQueue());else void processQueue();}
 });
 
-const queues = new Map();
-function enqueue(key, job) {
-  const previous = queues.get(key) || Promise.resolve();
-  const next = previous
-    .catch((error) => console.error('[FILA] Erro anterior:', error))
-    .then(job)
-    .catch((error) => console.error('[FILA] Falha ao processar conversa:', error));
-
-  queues.set(key, next);
-  void next.then(() => {
-    if (queues.get(key) === next) queues.delete(key);
-  });
-}
-
-async function handoff(company, phone, summary) {
-  db.setPaused(company.id, phone, true);
+async function handoff(company, phone, summary, inboundId) {
+  await db.markHandoffInbound(company.id, phone, inboundId, summary);
   if (!company.team_number) {
-    console.warn(`[TRANSBORDO] ${company.id}: equipe sem team_number; conversa ${phone} foi pausada, mas não houve notificação.`);
+    console.warn(`[TRANSBORDO] ${company.id}: equipe sem team_number; conversa ${phone} pausada, aviso não enfileirado.`);
+    await db.setPaused(company.id, phone, true);
     return;
   }
-
   const businessName = company.variables?.NOME_EMPRESA || company.id;
   const message = `🔔 *Transbordo* (${businessName})\nCliente: +${phone}\nMotivo: ${summary || 'não informado'}\nLink: https://wa.me/${phone}\n\nPara reativar o bot: #reativar ${phone}`;
-  try {
-    await sendText(company, company.team_number, message);
-  } catch (error) {
-    console.error('[TRANSBORDO] Conversa pausada, mas falhou o aviso à equipe:', error);
-  }
+  await db.enqueueOutbound(company.id, company.team_number, message, `${inboundId}:handoff`);
+  await db.setPaused(company.id, phone, true);
 }
 
-async function notifyCustomer(company, phone, message) {
-  try {
-    await sendText(company, phone, message);
-  } catch (error) {
-    console.error(`[WHATSAPP] Falha ao responder ao cliente +${phone} (${company.id}):`, error);
-  }
+async function notifyCustomer(company, phone, message, inboundId, suffix = 'customer') {
+  await db.enqueueOutbound(company.id, phone, message, `${inboundId}:${suffix}`);
 }
 
 async function handle(company, msg) {
-  if (!db.markSeen(msg.id)) return;
   const phone = msg.from;
+  const inboundId = msg.id;
+  if (inboundId && await db.hasCustomerReplyForInbound(inboundId)) {
+    if (await db.hasHandoffForInbound(inboundId)) await db.setPaused(company.id, phone, true);
+    return;
+  }
 
   if (phone === company.team_number) {
-    const command = msg.text?.body?.trim().match(/^#reativar\s+(\d{8,15})$/i);
-    if (command) {
-      db.setPaused(company.id, command[1], false);
-      db.clearHistory(company.id, command[1]);
-      await notifyCustomer(company, phone, `✅ Bot reativado para +${command[1]}.`);
+    const customerPhone = parseReactivationCommand(msg.text?.body);
+    if (customerPhone) {
+      await db.setPaused(company.id, customerPhone, false);
+      await db.clearHistory(company.id, customerPhone);
+      await notifyCustomer(company, phone, `✅ Bot reativado para +${customerPhone}.`, inboundId);
     }
     return;
   }
 
-  db.touchConversation(company.id, phone);
-  if (db.isPaused(company.id, phone)) return;
+  // A saved response is authoritative: retries finish history, handoff and outbox without calling the AI again.
+  let response = inboundId ? await db.getInboundResponse(inboundId) : null;
+  if (!response) {
+    await db.touchConversation(company.id, phone);
+    if (await db.isPaused(company.id, phone)) return;
 
-  if (msg.type !== 'text' || typeof msg.text?.body !== 'string' || !msg.text.body.trim()) {
-    await handoff(company, phone, `Cliente enviou conteúdo do tipo ${msg.type || 'desconhecido'}`);
-    await notifyCustomer(company, phone, 'Recebi sua mensagem! 😊 Vou encaminhar para nossa equipe continuar o atendimento.');
-    return;
+    if (msg.type !== 'text' || typeof msg.text?.body !== 'string' || !msg.text.body.trim()) {
+      response = await db.saveInboundResponse({
+        inbound_message_id: inboundId,
+        company_id: company.id,
+        phone,
+        inbound_text: `[Mensagem não textual: ${msg.type || 'desconhecido'}]`,
+        assistant_content: 'Cliente enviou conteúdo não textual; encaminhar para atendimento humano.',
+        customer_reply: 'Recebi sua mensagem! 😊 Vou encaminhar para nossa equipe continuar o atendimento.',
+        should_handoff: true,
+        handoff_summary: `Cliente enviou conteúdo do tipo ${msg.type || 'desconhecido'}`,
+      });
+    } else {
+      const inboundText = msg.text.body.trim();
+      let raw;
+      try {
+        const history = [...await db.getHistory(company.id, phone), { role: 'user', content: inboundText }];
+        raw = await askClaude(company.system, history);
+      } catch (error) {
+        console.error('[CLAUDE] Erro ao gerar resposta:', error);
+        response = await db.saveInboundResponse({
+          inbound_message_id: inboundId,
+          company_id: company.id,
+          phone,
+          inbound_text: inboundText,
+          assistant_content: FALLBACK_HANDOFF,
+          customer_reply: FALLBACK_HANDOFF,
+          should_handoff: true,
+          handoff_summary: 'Erro técnico na IA',
+        });
+      }
+
+      if (!response) {
+        const parsed = parseReply(raw);
+        response = await db.saveInboundResponse({
+          inbound_message_id: inboundId,
+          company_id: company.id,
+          phone,
+          inbound_text: inboundText,
+          assistant_content: raw,
+          customer_reply: parsed.text,
+          should_handoff: parsed.handoff,
+          handoff_summary: parsed.summary,
+        });
+      }
+    }
   }
 
-  db.addMessage(company.id, phone, 'user', msg.text.body.trim());
-  let raw;
-  try {
-    raw = await askClaude(company.system, db.getHistory(company.id, phone));
-  } catch (error) {
-    console.error('[CLAUDE] Erro ao gerar resposta:', error);
-    await handoff(company, phone, 'Erro técnico na IA');
-    await notifyCustomer(company, phone, FALLBACK_HANDOFF);
-    return;
-  }
-
-  const { text, handoff: shouldHandoff, summary } = parseReply(raw);
-  db.addMessage(company.id, phone, 'assistant', raw);
-
-  // Pausa e notifica a equipe antes de tentar enviar a resposta de transbordo.
-  if (shouldHandoff) await handoff(company, phone, summary);
-  await notifyCustomer(company, phone, text);
+  if (!response) throw new Error('Não foi possível persistir a resposta da mensagem recebida.');
+  await db.commitInboundResponseHistory(inboundId);
+  if (response.should_handoff) await handoff(company, phone, response.handoff_summary, inboundId);
+  await notifyCustomer(company, phone, response.customer_reply, inboundId);
 }
 
+async function processOutboundQueue() {
+  let processed = 0;
+  // Claim only when ready to send: a batch reservation can expire while later rows wait behind slow sends.
+  for (let index = 0; index < 10; index += 1) {
+    const [job] = await db.claimOutbound(1);
+    if (!job) break;
+    processed += 1;
+    try {
+      const company = companies[job.company_id];
+      if (!company) throw new Error('Empresa não encontrada para mensagem de saída');
+      const result = await sendText(company, job.destination, job.body);
+      await db.completeOutbound(job.id, job.lease_token, result?.messages?.[0]?.id || null);
+    } catch (error) {
+      console.error('[OUTBOX] Falha no envio; mensagem será reprocessada:', error);
+      await db.failOutbound(job.id, job.attempts, error, job.lease_token);
+    }
+  }
+  return processed;
+}
+
+async function processQueue() {
+  await ensureInitialized();
+  await db.purgeSeen();
+  await db.purgeUserSessions();
+  await db.purgeMessageJobs();
+  await db.purgeOutbound();
+  await db.purgeHandoffs();
+  await db.purgeInboundResponses();
+
+  let processedInbound = 0;
+  // Acquire one lease immediately before handling it, never reserve a batch that waits behind other AI calls.
+  for (let index = 0; index < 10; index += 1) {
+    const [job] = await db.claimMessageJobs(1);
+    if (!job) break;
+    processedInbound += 1;
+    try {
+      const company = companies[job.company_id];
+      if (!company) throw new Error('Empresa não encontrada');
+      await handle(company, job.payload);
+      await db.completeMessageJob(job.id, job.lease_token);
+    } catch (error) {
+      console.error('[JOB]', error);
+      await db.failMessageJob(job.id, job.attempts, error, job.lease_token);
+    }
+  }
+
+  const processedOutbound = await processOutboundQueue();
+  return processedInbound + processedOutbound;
+}
+app.get('/worker',async(req,res)=>{const secret=process.env.CRON_SECRET||'',p=bearerToken(req),a=Buffer.from(p),b=Buffer.from(secret);if(!secret||a.length!==b.length||!crypto.timingSafeEqual(a,b))return res.sendStatus(401);try{return res.json({ok:true,processed:await processQueue()});}catch(e){console.error(e);return res.sendStatus(500);}});
 function isAdmin(req) {
   const expected = process.env.ADMIN_TOKEN || '';
   const provided = req.get('x-admin-token') || '';
@@ -221,30 +260,18 @@ function bearerToken(req) {
   const header = req.get('authorization') || '';
   return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
 }
-function sessionUser(req) {
+async function sessionUser(req) {
   const token = bearerToken(req);
   if (!token || token.length > 200) return null;
-  return db.getSessionUser(crypto.createHash('sha256').update(token).digest('hex')) || null;
+  return await db.getSessionUser(crypto.createHash('sha256').update(token).digest('hex')) || null;
 }
 function loginKeys(ip, email) {
-  const emailKey = crypto.createHash('sha256').update(String(email || '').toLowerCase()).digest('hex');
-  return [`ip:${ip}`, `email:${emailKey}`];
+  const digest = (value) => crypto.createHash('sha256').update(value).digest('hex');
+  return [digest(`ip:${ip}`), digest(`email:${String(email || '').toLowerCase()}`)];
 }
-function loginBlocked(keys) {
-  const now = Date.now();
-  return keys.some((key) => {
-    const entry = loginAttempts.get(key);
-    if (!entry) return false;
-    if (now - entry.startedAt > 15 * 60 * 1000) {
-      loginAttempts.delete(key);
-      return false;
-    }
-    return entry.count >= 8;
-  });
-}
-function audit(action, user = null, targetType = null, targetId = null, metadata = {}) {
+async function audit(action, user = null, targetType = null, targetId = null, metadata = {}) {
   try {
-    db.addAuditLog({
+    await db.addAuditLog({
       company_id: user?.company_id || null,
       actor_user_id: user?.id || null,
       action, target_type: targetType, target_id: targetId,
@@ -254,55 +281,52 @@ function audit(action, user = null, targetType = null, targetId = null, metadata
     console.error('[AUDITORIA] Falha ao registrar evento:', error.message);
   }
 }
-function recordLoginFailure(keys) {
-  const now = Date.now();
-  for (const key of keys) {
-    const entry = loginAttempts.get(key);
-    if (!entry || now - entry.startedAt > 15 * 60 * 1000) loginAttempts.set(key, { count: 1, startedAt: now });
-    else entry.count += 1;
-  }
-}
-
 app.post('/auth/login', async (req, res) => {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
   const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
   const keys = loginKeys(ip, email);
-  if (loginBlocked(keys)) return res.status(429).json({ ok: false, error: 'Muitas tentativas. Aguarde 15 minutos.' });
+  if (await db.isLoginBlocked(keys)) return res.status(429).json({ ok: false, error: 'Muitas tentativas. Aguarde 15 minutos.' });
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
-  if (!email || email.length > 254 || password.length > 1024) return res.status(400).json({ ok: false, error: 'Credenciais inválidas.' });
-  const user = db.getUserByEmail(email);
+  if (!email || email.length > 254 || password.length > 1024) {
+    const blocked = await db.recordLoginFailure([keys[0]]);
+    if (blocked) return res.status(429).json({ ok: false, error: 'Muitas tentativas. Aguarde 15 minutos.' });
+    return res.status(400).json({ ok: false, error: 'Credenciais inválidas.' });
+  }
+  const user = await db.getUserByEmail(email);
   const salt = user?.password_salt || 'veyrion-login-dummy-salt';
   const candidate = await scrypt(password, salt, 64);
   const expected = user ? Buffer.from(user.password_hash, 'hex') : Buffer.alloc(64);
   if (!user || !user.active || expected.length !== candidate.length || !crypto.timingSafeEqual(expected, candidate)) {
-    recordLoginFailure(keys);
+    const blocked = await db.recordLoginFailure(keys);
+    if (blocked) return res.status(429).json({ ok: false, error: 'Muitas tentativas. Aguarde 15 minutos.' });
     return res.status(401).json({ ok: false, error: 'E-mail ou senha inválidos.' });
   }
-  for (const key of keys) loginAttempts.delete(key);
+  // Keep the IP-wide counter: a successful login for one account must not reset abuse against other accounts behind the same source.
+  await db.clearLoginAttempts([keys[1]]);
   const token = crypto.randomBytes(32).toString('base64url');
   const expiresAt = Date.now() + SESSION_TTL_MS;
-  db.createUserSession(crypto.createHash('sha256').update(token).digest('hex'), user.id, expiresAt);
-  db.updateUserLogin(user.id);
-  audit('auth.login', user, 'user', String(user.id));
+  await db.createUserSession(crypto.createHash('sha256').update(token).digest('hex'), user.id, expiresAt);
+  await db.updateUserLogin(user.id);
+  await audit('auth.login', user, 'user', String(user.id));
   return res.json({ ok: true, token, expires_at: expiresAt, user: { id: user.id, email: user.email, role: user.role, company_id: user.company_id } });
 });
 
-app.get('/auth/me', (req, res) => {
-  const user = sessionUser(req);
+app.get('/auth/me', async (req, res) => {
+  const user = await sessionUser(req);
   if (!user) return res.sendStatus(401);
   return res.json({ ok: true, user: { id: user.id, email: user.email, role: user.role, company_id: user.company_id } });
 });
 
-app.post('/auth/logout', (req, res) => {
+app.post('/auth/logout', async (req, res) => {
   const token = bearerToken(req);
-  const user = sessionUser(req);
-  if (token) db.deleteUserSession(crypto.createHash('sha256').update(token).digest('hex'));
-  if (user) audit('auth.logout', user, 'user', String(user.id));
+  const user = await sessionUser(req);
+  if (token) await db.deleteUserSession(crypto.createHash('sha256').update(token).digest('hex'));
+  if (user) await audit('auth.logout', user, 'user', String(user.id));
   return res.json({ ok: true });
 });
 
 app.post('/auth/change-password', async (req, res) => {
-  const user = sessionUser(req);
+  const user = await sessionUser(req);
   if (!user) return res.sendStatus(401);
   const currentPassword = typeof req.body?.current_password === 'string' ? req.body.current_password : '';
   if (!currentPassword || currentPassword.length > 1024) return res.status(400).json({ ok: false, error: 'Senha atual inválida.' });
@@ -310,7 +334,7 @@ app.post('/auth/change-password', async (req, res) => {
   if (newPassword.length < 12 || newPassword.length > 1024) {
     return res.status(400).json({ ok: false, error: 'A nova senha deve ter entre 12 e 1024 caracteres.' });
   }
-  const stored = db.getUserByEmail(user.email);
+  const stored = await db.getUserByEmail(user.email);
   const candidate = await scrypt(currentPassword, stored.password_salt, 64);
   const expected = Buffer.from(stored.password_hash, 'hex');
   if (expected.length !== candidate.length || !crypto.timingSafeEqual(expected, candidate)) {
@@ -318,33 +342,33 @@ app.post('/auth/change-password', async (req, res) => {
   }
   const salt = crypto.randomBytes(16).toString('hex');
   const hash = await scrypt(newPassword, salt, 64);
-  db.changeUserPassword(user.id, hash.toString('hex'), salt);
+  await db.changeUserPassword(user.id, hash.toString('hex'), salt);
   const token = bearerToken(req);
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
-  db.revokeOtherUserSessions(user.id, tokenHash);
-  audit('auth.password_changed', user, 'user', String(user.id));
+  await db.revokeOtherUserSessions(user.id, tokenHash);
+  await audit('auth.password_changed', user, 'user', String(user.id));
   return res.json({ ok: true, message: 'Senha alterada. Outras sessões foram encerradas.' });
 });
 
-app.get('/tenant/audit', (req, res) => {
-  const user = sessionUser(req);
+app.get('/tenant/audit', async (req, res) => {
+  const user = await sessionUser(req);
   if (!user) return res.sendStatus(401);
   if (!user.company_id || !['company_admin', 'operator', 'viewer'].includes(user.role)) return res.sendStatus(403);
   if (user.role !== 'company_admin') return res.sendStatus(403);
   res.set('Cache-Control', 'no-store');
-  return res.json({ ok: true, logs: db.getCompanyAuditLogs(user.company_id, req.query.limit) });
+  return res.json({ ok: true, logs: await db.getCompanyAuditLogs(user.company_id, req.query.limit) });
 });
 
-app.get('/admin/audit', (req, res) => {
+app.get('/admin/audit', async (req, res) => {
   if (!isAdmin(req)) return res.sendStatus(401);
   res.set('Cache-Control', 'no-store');
-  return res.json({ ok: true, logs: db.getAuditLogs(req.query.limit) });
+  return res.json({ ok: true, logs: await db.getAuditLogs(req.query.limit) });
 });
 
-app.get('/admin/users', (req, res) => {
+app.get('/admin/users', async (req, res) => {
   if (!isAdmin(req)) return res.sendStatus(401);
   res.set('Cache-Control', 'no-store');
-  return res.json({ ok: true, users: db.listUsers() });
+  return res.json({ ok: true, users: await db.listUsers() });
 });
 
 app.post('/admin/users', async (req, res) => {
@@ -357,34 +381,34 @@ app.post('/admin/users', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'A senha deve ter entre 12 e 1024 caracteres.' });
   }
   if (!USER_ROLES.has(role)) return res.status(400).json({ ok: false, error: 'Papel de usuário inválido.' });
-  refreshCompanies();
+  await refreshCompanies();
   if (role === 'platform_admin' ? companyId !== null : (typeof companyId !== 'string' || !companies[companyId])) {
     return res.status(400).json({ ok: false, error: 'Vínculo de empresa inválido para este papel.' });
   }
-  if (db.getUserByEmail(email.trim().toLowerCase())) return res.status(409).json({ ok: false, error: 'Este e-mail já está cadastrado.' });
+  if (await db.getUserByEmail(email.trim().toLowerCase())) return res.status(409).json({ ok: false, error: 'Este e-mail já está cadastrado.' });
   try {
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = await scrypt(password, salt, 64);
-    const id = db.createUser({ email: email.trim().toLowerCase(), password_hash: hash.toString('hex'), password_salt: salt, role, company_id: companyId });
-    audit('admin.user_created', null, 'user', String(id), { role, company_id: companyId });
-    return res.status(201).json({ ok: true, user: db.getUserById(id) });
+    const id = await db.createUser({ email: email.trim().toLowerCase(), password_hash: hash.toString('hex'), password_salt: salt, role, company_id: companyId });
+    await audit('admin.user_created', null, 'user', String(id), { role, company_id: companyId });
+    return res.status(201).json({ ok: true, user: await db.getUserById(id) });
   } catch (error) {
-    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ ok: false, error: 'Este e-mail já está cadastrado.' });
+    if (['23505', 'SQLITE_CONSTRAINT_UNIQUE'].includes(error.code)) return res.status(409).json({ ok: false, error: 'Este e-mail já está cadastrado.' });
     console.error('[ADMIN] Falha ao criar usuário:', error);
     return res.status(500).json({ ok: false, error: 'Não foi possível criar o usuário.' });
   }
 });
 
-app.get('/tenant/users', (req, res) => {
-  const user = sessionUser(req);
+app.get('/tenant/users', async (req, res) => {
+  const user = await sessionUser(req);
   if (!user) return res.sendStatus(401);
   if (user.role !== 'company_admin' || !user.company_id) return res.sendStatus(403);
   res.set('Cache-Control', 'no-store');
-  return res.json({ ok: true, users: db.listCompanyUsers(user.company_id) });
+  return res.json({ ok: true, users: await db.listCompanyUsers(user.company_id) });
 });
 
 app.post('/tenant/users', async (req, res) => {
-  const user = sessionUser(req);
+  const user = await sessionUser(req);
   if (!user) return res.sendStatus(401);
   if (user.role !== 'company_admin' || !user.company_id) return res.sendStatus(403);
   const { email, password, role } = req.body || {};
@@ -395,72 +419,72 @@ app.post('/tenant/users', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'A senha deve ter entre 12 e 1024 caracteres.' });
   }
   if (!['operator', 'viewer'].includes(role)) return res.status(400).json({ ok: false, error: 'O administrador da empresa pode criar apenas operadores e visualizadores.' });
-  if (db.getUserByEmail(email.trim().toLowerCase())) return res.status(409).json({ ok: false, error: 'Este e-mail já está cadastrado.' });
+  if (await db.getUserByEmail(email.trim().toLowerCase())) return res.status(409).json({ ok: false, error: 'Este e-mail já está cadastrado.' });
   try {
     const salt = crypto.randomBytes(16).toString('hex');
     const hash = await scrypt(password, salt, 64);
-    const id = db.createUser({ email: email.trim().toLowerCase(), password_hash: hash.toString('hex'), password_salt: salt, role, company_id: user.company_id });
-    audit('tenant.user_created', user, 'user', String(id), { role });
-    return res.status(201).json({ ok: true, user: db.getUserById(id) });
+    const id = await db.createUser({ email: email.trim().toLowerCase(), password_hash: hash.toString('hex'), password_salt: salt, role, company_id: user.company_id });
+    await audit('tenant.user_created', user, 'user', String(id), { role });
+    return res.status(201).json({ ok: true, user: await db.getUserById(id) });
   } catch (error) {
-    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(409).json({ ok: false, error: 'Este e-mail já está cadastrado.' });
+    if (['23505', 'SQLITE_CONSTRAINT_UNIQUE'].includes(error.code)) return res.status(409).json({ ok: false, error: 'Este e-mail já está cadastrado.' });
     console.error('[TENANT] Falha ao criar usuário da empresa:', error);
     return res.status(500).json({ ok: false, error: 'Não foi possível criar o usuário.' });
   }
 });
 
-app.post('/tenant/users/:id/disable', (req, res) => {
-  const user = sessionUser(req);
+app.post('/tenant/users/:id/disable', async (req, res) => {
+  const user = await sessionUser(req);
   if (!user) return res.sendStatus(401);
   if (user.role !== 'company_admin' || !user.company_id) return res.sendStatus(403);
   const id = Number.parseInt(req.params.id, 10);
   if (!Number.isSafeInteger(id) || id < 1 || id === user.id) return res.sendStatus(400);
-  const target = db.getUserById(id);
+  const target = await db.getUserById(id);
   if (!target || target.company_id !== user.company_id || !['operator', 'viewer'].includes(target.role)) return res.sendStatus(404);
-  const disabled = db.disableUser(id) === 1;
-  if (disabled) audit('tenant.user_disabled', user, 'user', String(id));
+  const disabled = await db.disableUser(id) === 1;
+  if (disabled) await audit('tenant.user_disabled', user, 'user', String(id));
   return res.json({ ok: true, disabled });
 });
 
-app.get('/tenant/overview', (req, res) => {
-  const user = sessionUser(req);
+app.get('/tenant/overview', async (req, res) => {
+  const user = await sessionUser(req);
   if (!user) return res.sendStatus(401);
   if (!user.company_id || !['company_admin', 'operator', 'viewer'].includes(user.role)) return res.sendStatus(403);
   res.set('Cache-Control', 'no-store');
   const limit = Number.parseInt(req.query.limit, 10) || 50;
-  return res.json({ ok: true, company_id: user.company_id, ...db.getCompanyOverview(user.company_id, limit) });
+  return res.json({ ok: true, company_id: user.company_id, ...(await db.getCompanyOverview(user.company_id, limit)) });
 });
 
-app.post('/admin/users/:id/disable', (req, res) => {
+app.post('/admin/users/:id/disable', async (req, res) => {
   if (!isAdmin(req)) return res.sendStatus(401);
   const id = Number.parseInt(req.params.id, 10);
   if (!Number.isSafeInteger(id) || id < 1) return res.sendStatus(400);
-  const user = db.getUserById(id);
+  const user = await db.getUserById(id);
   if (!user) return res.sendStatus(404);
   if (!user.active) return res.json({ ok: true, already_disabled: true });
-  const disabled = db.disableUser(id);
-  if (disabled === 1) audit('admin.user_disabled', null, 'user', String(id));
+  const disabled = await db.disableUser(id);
+  if (disabled === 1) await audit('admin.user_disabled', null, 'user', String(id));
   return res.json({ ok: true, disabled: disabled === 1 });
 });
 
-app.get('/admin/companies', (req, res) => {
+app.get('/admin/companies', async (req, res) => {
   if (!isAdmin(req)) return res.sendStatus(401);
   res.set('Cache-Control', 'no-store');
-  refreshCompanies();
+  await refreshCompanies();
   return res.json({ ok: true, companies: Object.values(companies).map(safeCompanyConfig) });
 });
 
 app.post('/admin/companies', async (req, res) => {
   if (!isAdmin(req)) return res.sendStatus(401);
-  refreshCompanies();
+  await refreshCompanies();
   const { id, ...config } = req.body || {};
   if (typeof id !== 'string' || companies[id]) return res.status(400).json({ ok: false, error: 'ID inválido ou já cadastrado.' });
   const error = validateCompanyConfig(id, config);
   if (error) return res.status(400).json({ ok: false, error });
   try {
-    await writeCompanyConfig(id, config);
-    refreshCompanies();
-    audit('admin.company_created', null, 'company', id);
+    await db.saveCompany(id, config);
+  await refreshCompanies();
+    await audit('admin.company_created', null, 'company', id);
     return res.status(201).json({ ok: true, company: safeCompanyConfig(companies[id]) });
   } catch (cause) {
     console.error('[ADMIN] Falha ao cadastrar empresa:', cause);
@@ -471,14 +495,14 @@ app.post('/admin/companies', async (req, res) => {
 app.put('/admin/companies/:id', async (req, res) => {
   if (!isAdmin(req)) return res.sendStatus(401);
   const { id } = req.params;
-  refreshCompanies();
+  await refreshCompanies();
   if (!companies[id] || id.startsWith('_')) return res.sendStatus(404);
   const error = validateCompanyConfig(id, req.body);
   if (error) return res.status(400).json({ ok: false, error });
   try {
-    await writeCompanyConfig(id, req.body);
-    refreshCompanies();
-    audit('admin.company_updated', null, 'company', id);
+    await db.saveCompany(id, req.body);
+  await refreshCompanies();
+    await audit('admin.company_updated', null, 'company', id);
     return res.json({ ok: true, company: safeCompanyConfig(companies[id]) });
   } catch (cause) {
     console.error('[ADMIN] Falha ao atualizar empresa:', cause);
@@ -486,46 +510,39 @@ app.put('/admin/companies/:id', async (req, res) => {
   }
 });
 
-app.get('/admin/overview', (req, res) => {
+app.get('/admin/overview', async (req, res) => {
   if (!isAdmin(req)) return res.sendStatus(401);
   res.set('Cache-Control', 'no-store');
   const limit = Number.parseInt(req.query.limit, 10) || 50;
-  return res.json({ ok: true, ...db.getOverview(limit) });
+  return res.json({ ok: true, ...(await db.getOverview(limit)) });
 });
 
-app.post('/admin/resume', (req, res) => {
+app.post('/admin/resume', async (req, res) => {
   if (!isAdmin(req)) {
     return res.sendStatus(401);
   }
-  refreshCompanies();
+  await refreshCompanies();
   const { company, phone } = req.body || {};
   if (!companies[company] || typeof phone !== 'string' || !/^\d{8,15}$/.test(phone)) {
     return res.sendStatus(400);
   }
-  db.setPaused(company, phone, false);
-  db.clearHistory(company, phone);
-  audit('admin.conversation_resumed', null, 'conversation', `${company}:${phone}`);
+  await db.setPaused(company, phone, false);
+  await db.clearHistory(company, phone);
+  await audit('admin.conversation_resumed', null, 'conversation', `${company}:${phone}`);
   return res.json({ ok: true });
 });
 
-app.get('/health', (_req, res) => res.json({
-  ok: true,
-  service: 'agente-whatsapp',
-  companies: Object.keys(companies).length,
-  whatsappConfigured: Object.keys(byPhoneId).length > 0,
-}));
+app.get('/health', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  return res.json({ ok: true, service: 'agente-whatsapp' });
+});
 
 app.use((error, _req, res, _next) => {
   console.error('[HTTP] Erro na requisição:', error);
   if (res.headersSent) return;
-  return res.status(error.status || 400).json({ ok: false, error: 'Requisição inválida.' });
+  const status = Number.isInteger(error.status) && error.status >= 400 && error.status <= 599 ? error.status : 500;
+  return res.status(status).json({ ok: false, error: status >= 500 ? 'Erro interno do servidor.' : 'Requisição inválida.' });
 });
 
-setInterval(db.purgeSeen, 3600 * 1000).unref();
-setInterval(db.purgeUserSessions, 3600 * 1000).unref();
-setInterval(() => {
-  const cutoff = Date.now() - 15 * 60 * 1000;
-  for (const [ip, entry] of loginAttempts) if (entry.startedAt < cutoff) loginAttempts.delete(ip);
-  while (loginAttempts.size > 10000) loginAttempts.delete(loginAttempts.keys().next().value);
-}, 5 * 60 * 1000).unref();
-app.listen(process.env.PORT || 3000, () => console.log('Agente no ar'));
+export default app;
+if (!process.env.VERCEL) app.listen(process.env.PORT || 3000, () => console.log('Agente no ar'));

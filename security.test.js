@@ -19,3 +19,12 @@ test('rejeita assinatura ausente, segredo ausente e corpo alterado', () => {
   assert.equal(verifyMetaSignature(Buffer.from('{"event":"changed"}'), signature, secret), false);
   assert.equal(verifyMetaSignature(null, signature, secret), false);
 });
+
+test('reconhece comando de reativação e rejeita formatos inválidos', async () => {
+  const { parseReactivationCommand } = await import('./security.js');
+  assert.equal(parseReactivationCommand('#reativar 5511999990000'), '5511999990000');
+  assert.equal(parseReactivationCommand('  #REATIVAR 5511999990000  '), '5511999990000');
+  assert.equal(parseReactivationCommand('#reativar abc'), null);
+  assert.equal(parseReactivationCommand('#reativar 1234567'), null);
+  assert.equal(parseReactivationCommand(null), null);
+});
