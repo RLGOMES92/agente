@@ -167,7 +167,7 @@ As migrações do Supabase são versionadas em `supabase/migrations`. Tabelas do
 
 
 ### Outbox durável de mensagens enviadas
-O backend grava respostas ao cliente e alertas de transbordo em `message_outbox` antes de tentar enviar. A outbox tem chave idempotente, claim atômico, lease recuperável, backoff exponencial (até 8 tentativas) e registro do ID retornado pela Meta. O worker `/worker` processa tanto mensagens inbound como outbound; configure scheduler a cada 1–5 minutos.
+O backend grava respostas ao cliente e alertas de transbordo em `message_outbox` antes de tentar enviar. A outbox tem chave idempotente, claim atômico, lease recuperável, backoff exponencial (até 8 tentativas) e registro do ID retornado pela Meta. O worker `/worker` processa tanto mensagens inbound como outbound; configure scheduler a cada 1–5 minutos. O worker agora reserva um job por vez imediatamente antes de processá-lo, evitando que mensagens no fim de um lote percam o lease enquanto aguardam chamadas anteriores.
 
 **Aplicação:** migração `20261126000100_add_durable_message_outbox.sql` adicionada ao repositório e aplicada ao projeto Supabase dedicado. Não é necessário reaplicar manualmente.
 
