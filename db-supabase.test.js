@@ -103,3 +103,43 @@ test('listCompanyUsers não consulta usuários de outras empresas', async () => 
   assert.equal(users.length, 1);
   assert.equal(users[0].company_id, 'tenant-a');
 });
+
+
+test('completeMessageJob exige e aplica o token da reserva atual', async () => {
+  const calls = mockJsonFetch(async () => null);
+  await db.completeMessageJob(12, '11111111-1111-4111-8111-111111111111');
+  assert.equal(calls[0].url.searchParams.get('lease_token'), 'eq.11111111-1111-4111-8111-111111111111');
+  assert.equal(calls[0].url.searchParams.get('status'), 'eq.processing');
+  assert.equal(JSON.parse(calls[0].init.body).lease_token, null);
+});
+
+test('failMessageJob também exige token e não altera reserva de outro worker', async () => {
+  const calls = mockJsonFetch(async () => null);
+  await db.failMessageJob(12, 1, new Error('transient'), '22222222-2222-4222-8222-222222222222');
+  assert.equal(calls[0].url.searchParams.get('lease_token'), 'eq.22222222-2222-4222-8222-222222222222');
+  assert.equal(calls[0].url.searchParams.get('status'), 'eq.processing');
+  assert.equal(JSON.parse(calls[0].init.body).lease_token, null);
+});
+
+test('completeOutbound exige token da reserva atual', async () => {
+  const calls = mockJsonFetch(async () => null);
+  await db.completeOutbound(4, '33333333-3333-4333-8333-333333333333', 'wamid.test');
+  assert.equal(calls[0].url.searchParams.get('lease_token'), 'eq.33333333-3333-4333-8333-333333333333');
+  assert.equal(calls[0].url.searchParams.get('status'), 'eq.processing');
+  assert.equal(JSON.parse(calls[0].init.body).provider_message_id, 'wamid.test');
+});
+
+test('failOutbound exige token da reserva atual', async () => {
+  const calls = mockJsonFetch(async () => null);
+  await db.failOutbound(4, 1, new Error('transient'), '44444444-4444-4444-8444-444444444444');
+  assert.equal(calls[0].url.searchParams.get('lease_token'), 'eq.44444444-4444-4444-8444-444444444444');
+  assert.equal(calls[0].url.searchParams.get('status'), 'eq.processing');
+  assert.equal(JSON.parse(calls[0].init.body).lease_token, null);
+});
+
+test('não permite concluir ou falhar jobs sem lease token', async () => {
+  await assert.rejects(() => db.completeMessageJob(12), /Lease token ausente/);
+  await assert.rejects(() => db.failMessageJob(12, 1, new Error('x')), /Lease token ausente/);
+  await assert.rejects(() => db.completeOutbound(4), /Lease token ausente/);
+  await assert.rejects(() => db.failOutbound(4, 1, new Error('x')), /Lease token ausente/);
+});
