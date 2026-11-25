@@ -28,7 +28,7 @@ async function refreshCompanies() {
 }
 let initialization;
 async function ensureInitialized(){if(!initialization)initialization=refreshCompanies();await initialization;}
-if (!process.env.APP_SECRET) console.warn('[SEGURANÇA] APP_SECRET ausente: webhooks serão rejeitados em produção.');
+if (!process.env.APP_SECRET) console.warn('[SEGURANÇA] APP_SECRET ausente: webhooks serão rejeitados em qualquer ambiente.');
 const app = express();
 const scrypt = promisify(crypto.scrypt);
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
