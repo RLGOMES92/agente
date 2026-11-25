@@ -124,7 +124,7 @@ async function handle(company, msg) {
   if (inboundId && await db.hasCustomerReplyForInbound(inboundId)) return;
 
   if (phone === company.team_number) {
-    const command = msg.text?.body?.trim().match(/^#reativar\\s+(\\d{8,15})$/i);
+    const command = msg.text?.body?.trim().match(/^#reativar\s+(\d{8,15})$/i);
     if (command) {
       await db.setPaused(company.id, command[1], false);
       await db.clearHistory(company.id, command[1]);
