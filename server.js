@@ -161,7 +161,7 @@ async function handle(company, msg) {
 }
 
 async function processQueue(){await ensureInitialized();await db.purgeSeen();await db.purgeUserSessions();await db.purgeMessageJobs();const jobs=await db.claimMessageJobs(10);for(const j of jobs){try{const co=companies[j.company_id];if(!co)throw Error('Empresa não encontrada');await handle(co,j.payload);await db.completeMessageJob(j.id);}catch(e){console.error('[JOB]',e);await db.failMessageJob(j.id,j.attempts,e);}}return jobs.length;}
-app.get('/worker',async(req,res)=>{const secret=process.env.CRON_SECRET||'',p=(req.get('authorization')||'').replace(/^Bearer\\s+/i,''),a=Buffer.from(p),b=Buffer.from(secret);if(!secret||a.length!==b.length||!crypto.timingSafeEqual(a,b))return res.sendStatus(401);try{return res.json({ok:true,processed:await processQueue()});}catch(e){console.error(e);return res.sendStatus(500);}});
+app.get('/worker',async(req,res)=>{const secret=process.env.CRON_SECRET||'',p=bearerToken(req),a=Buffer.from(p),b=Buffer.from(secret);if(!secret||a.length!==b.length||!crypto.timingSafeEqual(a,b))return res.sendStatus(401);try{return res.json({ok:true,processed:await processQueue()});}catch(e){console.error(e);return res.sendStatus(500);}});
 function isAdmin(req) {
   const expected = process.env.ADMIN_TOKEN || '';
   const provided = req.get('x-admin-token') || '';
@@ -472,7 +472,8 @@ app.get('/health', (_req, res) => res.json({
 app.use((error, _req, res, _next) => {
   console.error('[HTTP] Erro na requisição:', error);
   if (res.headersSent) return;
-  return res.status(error.status || 400).json({ ok: false, error: 'Requisição inválida.' });
+  const status = Number.isInteger(error.status) && error.status >= 400 && error.status <= 599 ? error.status : 500;
+  return res.status(status).json({ ok: false, error: status >= 500 ? 'Erro interno do servidor.' : 'Requisição inválida.' });
 });
 
 setInterval(() => {
