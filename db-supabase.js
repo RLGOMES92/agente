@@ -491,23 +491,28 @@ export async function claimOutbound(limit = 10) {
   return (rows || []).map(row => ({ ...row, id: Number(row.id), attempts: Number(row.attempts) }));
 }
 
-export async function completeOutbound(id, providerMessageId = null) {
+export async function completeOutbound(id, leaseToken, providerMessageId = null) {
+  if (!leaseToken) throw new Error('Lease token ausente ao concluir mensagem de saída.');
   return request('message_outbox', {
-    method: 'PATCH', query: { id: `eq.${id}` },
-    body: { status: 'sent', sent_at: new Date().toISOString(), locked_at: null, provider_message_id: providerMessageId },
+    method: 'PATCH',
+    query: { id: `eq.${id}`, status: 'eq.processing', lease_token: `eq.${leaseToken}` },
+    body: { status: 'sent', sent_at: new Date().toISOString(), locked_at: null, lease_token: null, provider_message_id: providerMessageId },
     prefer: 'return=minimal',
   });
 }
 
-export async function failOutbound(id, attempts, error) {
+export async function failOutbound(id, attempts, error, leaseToken) {
+  if (!leaseToken) throw new Error('Lease token ausente ao registrar falha de saída.');
   const terminal = Number(attempts) >= 8;
   const delayMs = Math.min(60 * 60 * 1000, 30 * 1000 * 2 ** Math.max(0, Number(attempts) - 1));
   return request('message_outbox', {
-    method: 'PATCH', query: { id: `eq.${id}` },
+    method: 'PATCH',
+    query: { id: `eq.${id}`, status: 'eq.processing', lease_token: `eq.${leaseToken}` },
     body: {
       status: terminal ? 'failed' : 'pending',
       available_at: new Date(Date.now() + delayMs).toISOString(),
       locked_at: null,
+      lease_token: null,
       last_error: String(error?.message || error || 'unknown').slice(0, 1000),
     },
     prefer: 'return=minimal',
@@ -541,25 +546,28 @@ export async function purgeMessageJobs() {
   });
 }
 
-export async function completeMessageJob(id) {
+export async function completeMessageJob(id, leaseToken) {
+  if (!leaseToken) throw new Error('Lease token ausente ao concluir mensagem recebida.');
   return request('message_jobs', {
     method: 'PATCH',
-    query: { id: `eq.${id}` },
-    body: { status: 'completed', completed_at: new Date().toISOString(), locked_at: null },
+    query: { id: `eq.${id}`, status: 'eq.processing', lease_token: `eq.${leaseToken}` },
+    body: { status: 'completed', completed_at: new Date().toISOString(), locked_at: null, lease_token: null },
     prefer: 'return=minimal',
   });
 }
 
-export async function failMessageJob(id, attempts, error) {
+export async function failMessageJob(id, attempts, error, leaseToken) {
+  if (!leaseToken) throw new Error('Lease token ausente ao registrar falha de mensagem recebida.');
   const terminal = Number(attempts) >= 5;
   const delayMs = Math.min(15 * 60 * 1000, 2 ** Math.max(0, Number(attempts) - 1) * 30 * 1000);
   return request('message_jobs', {
     method: 'PATCH',
-    query: { id: `eq.${id}` },
+    query: { id: `eq.${id}`, status: 'eq.processing', lease_token: `eq.${leaseToken}` },
     body: {
       status: terminal ? 'failed' : 'pending',
       available_at: new Date(Date.now() + delayMs).toISOString(),
       locked_at: null,
+      lease_token: null,
       last_error: String(error?.message || error || 'unknown').slice(0, 1000),
     },
     prefer: 'return=minimal',
