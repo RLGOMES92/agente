@@ -95,7 +95,7 @@ Endpoints:
 - Use tokens fortes e exclusivos para `VERIFY_TOKEN` e `ADMIN_TOKEN`.
 - `APP_SECRET` é obrigatório em todos os ambientes que recebem webhooks: sem ele, `POST /webhook` responde `503`; com ele, toda requisição precisa apresentar `X-Hub-Signature-256` válida. Configure um segredo de teste separado para desenvolvimento local.
 - `VERIFY_TOKEN` é obrigatório para a verificação inicial do webhook da Meta; `ADMIN_TOKEN` deve ser forte e exclusivo para proteger as rotas administrativas.
-- O login limita tentativas por IP e por conta (8 falhas em 15 minutos). O contador é mantido em memória; em múltiplas instâncias, configure também um limitador compartilhado no proxy/Redis.
+- O login limita tentativas por IP e por conta com controle persistente no Supabase (8 falhas em 15 minutos). As chaves são hashes SHA-256; um login válido limpa o contador da conta, mas preserva o contador agregado do IP até o fim da janela.
 - A configuração da DaPaz é inicial e não contém preços nem dados de agenda; revise e complete a base antes de atendimento real.
 
 
@@ -119,7 +119,7 @@ A autenticação de usuários é separada do acesso administrativo por `ADMIN_TO
 - `POST /tenant/users`: cria usuários `operator` ou `viewer` na própria empresa (somente `company_admin`).
 - `POST /tenant/users/:id/disable`: desativa operador/visualizador da própria empresa e revoga suas sessões; não permite desativar a própria conta nem administradores.
 
-As senhas são derivadas com scrypt e salt aleatório; o banco armazena apenas o hash. O token de sessão é armazenado como hash SHA-256. Tentativas de login por IP e por conta são limitadas temporariamente (8 falhas em 15 minutos), com limpeza periódica do controle em memória. Em múltiplas instâncias, use também um limitador compartilhado no proxy/Redis. A auditoria registra ações administrativas e de autenticação sem armazenar senhas, tokens ou conteúdo de mensagens. Não compartilhe tokens de sessão e use HTTPS em produção.
+As senhas são derivadas com scrypt e salt aleatório; o banco armazena apenas o hash. O token de sessão é armazenado como hash SHA-256. Tentativas de login por IP e por conta são limitadas de forma persistente no Supabase (8 falhas em 15 minutos), funcionando entre instâncias serverless. As chaves de limitação são hashes SHA-256, e o contador da conta é removido após autenticação válida; o contador do IP permanece até expirar para não permitir que uma conta válida zere o limite compartilhado por outros usuários. A tabela e as RPCs de controle são restritas à `service_role`. A auditoria registra ações administrativas e de autenticação sem armazenar senhas, tokens ou conteúdo de mensagens. Não compartilhe tokens de sessão e use HTTPS em produção.
 
 **Painel:** a tela `/painel/` oferece duas entradas: console administrativo via `ADMIN_TOKEN` e acesso da equipe via e-mail/senha. O acesso da equipe mostra somente os indicadores e conversas da empresa vinculada; o papel `company_admin` também pode cadastrar e desativar operadores/visualizadores da própria empresa.
 
