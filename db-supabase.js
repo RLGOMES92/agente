@@ -383,3 +383,21 @@ export async function failMessageJob(id, attempts, error) {
 }
 
 export const closeDatabase = () => {};
+
+
+export async function saveCompany(id, input) {
+  return request('companies', {
+    method: 'POST',
+    query: { on_conflict: 'id' },
+    body: {
+      id,
+      phone_number_id: input.phone_number_id || null,
+      token_env: input.token_env,
+      team_number: input.team_number || '',
+      variables: input.variables || {},
+      active: true,
+      updated_at: new Date().toISOString(),
+    },
+    prefer: 'resolution=merge-duplicates,return=representation',
+  });
+}
