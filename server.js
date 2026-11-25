@@ -104,14 +104,16 @@ app.post('/webhook', async (req,res)=>{
 });
 
 async function handoff(company, phone, summary, inboundId) {
-  await db.setPaused(company.id, phone, true);
+  await db.markHandoffInbound(company.id, phone, inboundId, summary);
   if (!company.team_number) {
     console.warn(`[TRANSBORDO] ${company.id}: equipe sem team_number; conversa ${phone} pausada, aviso não enfileirado.`);
+    await db.setPaused(company.id, phone, true);
     return;
   }
   const businessName = company.variables?.NOME_EMPRESA || company.id;
   const message = `🔔 *Transbordo* (${businessName})\nCliente: +${phone}\nMotivo: ${summary || 'não informado'}\nLink: https://wa.me/${phone}\n\nPara reativar o bot: #reativar ${phone}`;
   await db.enqueueOutbound(company.id, company.team_number, message, `${inboundId}:handoff`);
+  await db.setPaused(company.id, phone, true);
 }
 
 async function notifyCustomer(company, phone, message, inboundId, suffix = 'customer') {
@@ -122,7 +124,10 @@ async function handle(company, msg) {
   // Persist inbound dedupe separately from outbound delivery; replies are stored before sending.
   const phone = msg.from;
   const inboundId = msg.id;
-  if (inboundId && await db.hasCustomerReplyForInbound(inboundId)) return;
+  if (inboundId && await db.hasCustomerReplyForInbound(inboundId)) {
+    if (await db.hasHandoffForInbound(inboundId)) await db.setPaused(company.id, phone, true);
+    return;
+  }
 
   if (phone === company.team_number) {
     const customerPhone = parseReactivationCommand(msg.text?.body);
@@ -135,7 +140,13 @@ async function handle(company, msg) {
   }
 
   await db.touchConversation(company.id, phone);
-  if (await db.isPaused(company.id, phone)) return;
+  if (await db.isPaused(company.id, phone)) {
+    // A previous attempt may have paused this conversation before persisting its customer acknowledgement.
+    if (inboundId && await db.hasHandoffForInbound(inboundId)) {
+      await notifyCustomer(company, phone, FALLBACK_HANDOFF, inboundId);
+    }
+    return;
+  }
 
   if (msg.type !== 'text' || typeof msg.text?.body !== 'string' || !msg.text.body.trim()) {
     await handoff(company, phone, `Cliente enviou conteúdo do tipo ${msg.type || 'desconhecido'}`, inboundId);
