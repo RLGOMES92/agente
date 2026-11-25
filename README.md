@@ -182,3 +182,10 @@ O backend grava respostas ao cliente e alertas de transbordo em `message_outbox`
 - [ ] Confirmar isolamento entre tenants e autenticação administrativa.
 - [ ] Configurar scheduler para chamar `/worker` a cada 1–5 minutos, com `Authorization: Bearer CRON_SECRET`; não expor esse segredo em URL/logs.
 - [ ] Fazer deploy de Preview e validar antes de produção.
+
+
+### Segurança das reservas da fila
+Cada reserva inbound/outbound recebe um `lease_token` UUID novo. Concluir ou devolver um job à fila exige o mesmo token e o estado `processing`; se outro worker recuperar uma reserva expirada, o worker antigo não consegue alterar o estado da nova reserva. Isso protege as atualizações do banco contra workers obsoletos, mas não elimina a possibilidade de entrega duplicada se a Meta aceitar um envio e a confirmação se perder.
+
+### Testes do adaptador Supabase
+`npm test` inclui testes com `fetch` simulado para verificar que histórico, exclusão, visão geral e usuários são sempre filtrados pelo `company_id`, além das condições de propriedade das reservas da fila. `npm run check` também verifica a sintaxe desse arquivo de teste.
