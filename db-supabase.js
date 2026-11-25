@@ -359,12 +359,11 @@ export async function claimMessageJobs(limit = 10) {
   return (rows || []).map((row) => ({ ...row, id: Number(row.id), attempts: Number(row.attempts) }));
 }
 
-export async function hasOutboundForInbound(inboundId) {
-  const keys = [`${inboundId}:customer`, `${inboundId}:handoff`];
-  const results = await Promise.all(keys.map(key => request('message_outbox', {
-    query: { select: 'id', idempotency_key: `eq.${key}`, limit: 1 },
-  })));
-  return results.some(rows => Array.isArray(rows) && rows.length > 0);
+export async function hasCustomerReplyForInbound(inboundId) {
+  const rows = await request('message_outbox', {
+    query: { select: 'id', idempotency_key: `eq.${inboundId}:customer`, limit: 1 },
+  });
+  return Array.isArray(rows) && rows.length > 0;
 }
 
 export async function enqueueOutbound(companyId, destination, body, idempotencyKey) {
