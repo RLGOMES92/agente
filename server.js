@@ -9,7 +9,7 @@ import { loadCompaniesFromDatabase, askClaude, parseReply, FALLBACK_HANDOFF } fr
 import { sendText } from './whatsapp.js';
 import * as db from './db-supabase.js';
 import { waitUntil } from '@vercel/functions';
-import { verifyMetaSignature } from './security.js';
+import { verifyMetaSignature, parseReactivationCommand } from './security.js';
 
 let companies = {};
 let byPhoneId = {};
@@ -124,11 +124,11 @@ async function handle(company, msg) {
   if (inboundId && await db.hasCustomerReplyForInbound(inboundId)) return;
 
   if (phone === company.team_number) {
-    const command = msg.text?.body?.trim().match(/^#reativar\s+(\d{8,15})$/i);
-    if (command) {
-      await db.setPaused(company.id, command[1], false);
-      await db.clearHistory(company.id, command[1]);
-      await notifyCustomer(company, phone, `✅ Bot reativado para +${command[1]}.`, inboundId);
+    const customerPhone = parseReactivationCommand(msg.text?.body);
+    if (customerPhone) {
+      await db.setPaused(company.id, customerPhone, false);
+      await db.clearHistory(company.id, customerPhone);
+      await notifyCustomer(company, phone, `✅ Bot reativado para +${customerPhone}.`, inboundId);
     }
     return;
   }
