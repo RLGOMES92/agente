@@ -27,7 +27,16 @@ async function refreshCompanies() {
   return companies;
 }
 let initialization;
-async function ensureInitialized(){if(!initialization)initialization=refreshCompanies();await initialization;}
+async function ensureInitialized() {
+  if (!initialization) {
+    initialization = refreshCompanies().catch((error) => {
+      // Allow a later request to retry after a transient Supabase/network failure.
+      initialization = null;
+      throw error;
+    });
+  }
+  await initialization;
+}
 if (!process.env.APP_SECRET) console.warn('[SEGURANÇA] APP_SECRET ausente: webhooks serão rejeitados em qualquer ambiente.');
 const app = express();
 const scrypt = promisify(crypto.scrypt);
