@@ -26,7 +26,7 @@ async function refreshCompanies() {
   return companies;
 }
 let initialization;
-async function ensureInitialized(){if(!initialization)initialization=await refreshCompanies();await initialization;}
+async function ensureInitialized(){if(!initialization)initialization=refreshCompanies();await initialization;}
 if (!process.env.APP_SECRET) console.warn('[SEGURANÇA] APP_SECRET ausente: webhooks serão rejeitados em produção.');
 const app = express();
 const scrypt = promisify(crypto.scrypt);
@@ -308,7 +308,7 @@ app.post('/admin/users', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'A senha deve ter entre 12 e 1024 caracteres.' });
   }
   if (!USER_ROLES.has(role)) return res.status(400).json({ ok: false, error: 'Papel de usuário inválido.' });
-  refreshCompanies();
+  await refreshCompanies();
   if (role === 'platform_admin' ? companyId !== null : (typeof companyId !== 'string' || !companies[companyId])) {
     return res.status(400).json({ ok: false, error: 'Vínculo de empresa inválido para este papel.' });
   }
@@ -397,20 +397,20 @@ app.post('/admin/users/:id/disable', async (req, res) => {
 app.get('/admin/companies', async (req, res) => {
   if (!isAdmin(req)) return res.sendStatus(401);
   res.set('Cache-Control', 'no-store');
-  refreshCompanies();
+  await refreshCompanies();
   return res.json({ ok: true, companies: Object.values(companies).map(safeCompanyConfig) });
 });
 
 app.post('/admin/companies', async (req, res) => {
   if (!isAdmin(req)) return res.sendStatus(401);
-  refreshCompanies();
+  await refreshCompanies();
   const { id, ...config } = req.body || {};
   if (typeof id !== 'string' || companies[id]) return res.status(400).json({ ok: false, error: 'ID inválido ou já cadastrado.' });
   const error = validateCompanyConfig(id, config);
   if (error) return res.status(400).json({ ok: false, error });
   try {
     await db.saveCompany(id, config);
-    refreshCompanies();
+  await refreshCompanies();
     await audit('admin.company_created', null, 'company', id);
     return res.status(201).json({ ok: true, company: safeCompanyConfig(companies[id]) });
   } catch (cause) {
@@ -422,13 +422,13 @@ app.post('/admin/companies', async (req, res) => {
 app.put('/admin/companies/:id', async (req, res) => {
   if (!isAdmin(req)) return res.sendStatus(401);
   const { id } = req.params;
-  refreshCompanies();
+  await refreshCompanies();
   if (!companies[id] || id.startsWith('_')) return res.sendStatus(404);
   const error = validateCompanyConfig(id, req.body);
   if (error) return res.status(400).json({ ok: false, error });
   try {
     await db.saveCompany(id, req.body);
-    refreshCompanies();
+  await refreshCompanies();
     await audit('admin.company_updated', null, 'company', id);
     return res.json({ ok: true, company: safeCompanyConfig(companies[id]) });
   } catch (cause) {
@@ -448,7 +448,7 @@ app.post('/admin/resume', async (req, res) => {
   if (!isAdmin(req)) {
     return res.sendStatus(401);
   }
-  refreshCompanies();
+  await refreshCompanies();
   const { company, phone } = req.body || {};
   if (!companies[company] || typeof phone !== 'string' || !/^\d{8,15}$/.test(phone)) {
     return res.sendStatus(400);
