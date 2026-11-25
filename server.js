@@ -287,7 +287,11 @@ app.post('/auth/login', async (req, res) => {
   const keys = loginKeys(ip, email);
   if (await db.isLoginBlocked(keys)) return res.status(429).json({ ok: false, error: 'Muitas tentativas. Aguarde 15 minutos.' });
   const password = typeof req.body?.password === 'string' ? req.body.password : '';
-  if (!email || email.length > 254 || password.length > 1024) return res.status(400).json({ ok: false, error: 'Credenciais inválidas.' });
+  if (!email || email.length > 254 || password.length > 1024) {
+    const blocked = await db.recordLoginFailure([keys[0]]);
+    if (blocked) return res.status(429).json({ ok: false, error: 'Muitas tentativas. Aguarde 15 minutos.' });
+    return res.status(400).json({ ok: false, error: 'Credenciais inválidas.' });
+  }
   const user = await db.getUserByEmail(email);
   const salt = user?.password_salt || 'veyrion-login-dummy-salt';
   const candidate = await scrypt(password, salt, 64);
