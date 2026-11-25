@@ -193,3 +193,7 @@ Cada reserva inbound/outbound recebe um `lease_token` UUID novo. Concluir ou dev
 Tentativas de login com e-mail ausente/malformado ou senha acima do limite também consomem o contador agregado por IP; entradas inválidas não podem contornar o rate limit enviando requisições repetidas com formato incorreto.
 
 O backend aceita a chave nova `sb_secret_...` e a chave legada `service_role`. A chave nova é enviada somente no header `apikey` (não é JWT); o header Bearer é mantido apenas para a chave legada JWT.
+
+
+### Agendamento do worker
+O endpoint `GET /worker` precisa ser chamado periodicamente com `Authorization: Bearer $CRON_SECRET`. Esta branch ainda não contém `vercel.json` nem um agendamento ativo. O projeto Vercel atual está no plano Hobby, que permite Cron no máximo uma vez por dia; isso não atende à recuperação de filas a cada 1–5 minutos. Use um agendador externo que chame o endpoint a cada 5 minutos ou um plano Vercel com intervalo de um minuto. Nunca exponha `CRON_SECRET`.
