@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import 'express-async-errors';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -68,6 +69,7 @@ function safeCompanyConfig(company) {
 }
 
 app.use(express.static(path.join(root, 'public'), { index: 'index.html', maxAge: '1h' }));
+app.get('/painel', (_req,res)=>res.redirect(302,'/'));
 app.use(express.json({ limit: '1mb', verify: (req, _res, buf) => { req.raw = buf; } }));
 app.use(async (_req,res,next)=>{try{await ensureInitialized();next();}catch(e){console.error('[INIT]',e);res.status(503).json({ok:false,error:'Serviço indisponível.'});}});
 
